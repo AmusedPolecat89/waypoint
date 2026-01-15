@@ -82,10 +82,23 @@ function setupContextMenus() {
   });
 }
 
+// Track current update menu item IDs to remove them before refresh
+let currentUpdateMenuIds: string[] = [];
+
 /**
  * Refresh the "Update waypoint for..." submenu with current works
  */
 async function refreshUpdateMenu() {
+  // Remove existing update menu items first
+  for (const id of currentUpdateMenuIds) {
+    try {
+      await chrome.contextMenus.remove(id);
+    } catch {
+      // Item may not exist, ignore
+    }
+  }
+  currentUpdateMenuIds = [];
+
   const works = await getWorks();
 
   // Get recent works (limit to 10 most recently updated)
@@ -93,22 +106,26 @@ async function refreshUpdateMenu() {
 
   if (recentWorks.length === 0) {
     // No works yet - show disabled placeholder
+    const id = `${MENU_UPDATE_PREFIX}empty`;
     chrome.contextMenus.create({
-      id: `${MENU_UPDATE_PREFIX}empty`,
+      id,
       parentId: MENU_UPDATE_WAYPOINT,
       title: '(No works yet)',
       enabled: false,
       contexts: ['page', 'link'],
     });
+    currentUpdateMenuIds.push(id);
   } else {
     // Create menu item for each work
     for (const work of recentWorks) {
+      const id = `${MENU_UPDATE_PREFIX}${work.id}`;
       chrome.contextMenus.create({
-        id: `${MENU_UPDATE_PREFIX}${work.id}`,
+        id,
         parentId: MENU_UPDATE_WAYPOINT,
         title: work.title,
         contexts: ['page', 'link'],
       });
+      currentUpdateMenuIds.push(id);
     }
   }
 }
@@ -167,10 +184,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       episode: progress.episode,
     });
 
-    // Refresh the update menu to include the new work
-    await refreshUpdateMenu();
-
-    // Notify user
+    // Storage change listener will refresh the update menu
     console.log(`Added "${work.title}" as ${mediaType}`);
 
     return;
@@ -205,18 +219,21 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   }
 });
 
+// Debounce timer for storage change handler
+let refreshDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
 /**
  * Listen for storage changes to refresh update menu
  */
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName === 'local' && changes.waypoint_store) {
-    // Rebuild the update menu when works change
-    // Use a small delay to batch rapid changes
-    setTimeout(() => {
-      // Remove all children of the update menu first
-      chrome.contextMenus.removeAll(() => {
-        setupContextMenus();
-      });
+    // Debounce rapid changes
+    if (refreshDebounceTimer) {
+      clearTimeout(refreshDebounceTimer);
+    }
+    refreshDebounceTimer = setTimeout(() => {
+      refreshDebounceTimer = null;
+      refreshUpdateMenu();
     }, 100);
   }
 });

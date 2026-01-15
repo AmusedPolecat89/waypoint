@@ -124,7 +124,7 @@ export const ANIME_SITES = [
   'myanimelist.net', 'anilist.co', 'kitsu.io', 'anime-planet.com',
   'anidb.net', 'annict.com', 'annict.jp', 'livechart.me',
   // Fan/unofficial streaming
-  '9anime', 'gogoanime', 'animixplay', 'zoro.to', 'aniwatch',
+  'hianime.to', '9anime', 'gogoanime', 'animixplay', 'zoro.to', 'aniwatch',
   'animesuge', 'animepahe', 'twist.moe', 'animekisa', 'animedao',
   'animefrenzy', 'animeowl', 'animesaturn', 'animeflv',
   'jkanime', 'monoschinos', 'tioanime', 'animeyt',
@@ -415,6 +415,15 @@ export function extractProgressSimple(
 
 /** Patterns to remove from end of page titles */
 const TITLE_SUFFIX_PATTERNS = [
+  // Streaming site patterns (generic)
+  /\s+English\s+(?:Sub(?:bed)?|Dub(?:bed)?)[\s\/].+$/i, // "English Sub/Dub online Free on..."
+  /\s+(?:Sub(?:bed)?|Dub(?:bed)?)\s+online.+$/i, // "Subbed online Free..."
+  /\s+online\s+Free\s+on\s+.+$/i, // "online Free on [Site]"
+  /\s+(?:Watch|Stream|Read)\s+(?:Online|Free|Now).+$/i, // "Watch Online Free..."
+  /\s+Free\s+on\s+\S+\.\w{2,}$/i, // "Free on site.com"
+  /\s+on\s+\S+\.(?:to|com|net|org|io|tv|me|cc|ws|se)$/i, // "on site.to" (common TLDs)
+  /\s+[-–—|]\s+\S+\.(?:to|com|net|org|io|tv|me|cc|ws|se)$/i, // "- site.com"
+  // General patterns
   / [-–—|:] .{0,30}$/, // "Title - Site Name" (short suffixes only)
   / :: .+$/,
   /\s*\([^)]{0,20}\)$/, // (Site Name) at end
