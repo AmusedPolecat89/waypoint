@@ -5,7 +5,7 @@
  * All data stays on device by default.
  */
 
-import type { WaypointStore, Work, Waypoint } from './types';
+import type { WaypointStore, Work, Waypoint, WorkStatus } from './types';
 import { createEmptyStore } from './types';
 import { generateId, now } from './utils';
 
@@ -354,6 +354,275 @@ export async function importCSV(csv: string): Promise<{ imported: number; skippe
         [progressField]: progress,
         note,
         sourceUrl,
+      });
+    }
+
+    imported++;
+  }
+
+  return { imported, skipped };
+}
+
+/**
+ * AniList GraphQL API types
+ */
+interface AniListMediaEntry {
+  media: {
+    title: {
+      userPreferred: string;
+      romaji: string;
+      english: string | null;
+    };
+    type: 'ANIME' | 'MANGA';
+    siteUrl: string;
+  };
+  status: 'CURRENT' | 'COMPLETED' | 'PAUSED' | 'DROPPED' | 'PLANNING' | 'REPEATING';
+  progress: number | null;
+  progressVolumes: number | null;
+}
+
+interface AniListMediaList {
+  entries: AniListMediaEntry[];
+}
+
+interface AniListMediaListCollection {
+  lists: AniListMediaList[];
+}
+
+interface AniListResponse {
+  data: {
+    anime: AniListMediaListCollection | null;
+    manga: AniListMediaListCollection | null;
+  };
+}
+
+/**
+ * Import data from AniList by username
+ */
+export async function importAniList(username: string): Promise<{ imported: number; skipped: number }> {
+  const query = `
+    query ($username: String) {
+      anime: MediaListCollection(userName: $username, type: ANIME) {
+        lists {
+          entries {
+            media {
+              title {
+                userPreferred
+                romaji
+                english
+              }
+              type
+              siteUrl
+            }
+            status
+            progress
+          }
+        }
+      }
+      manga: MediaListCollection(userName: $username, type: MANGA) {
+        lists {
+          entries {
+            media {
+              title {
+                userPreferred
+                romaji
+                english
+              }
+              type
+              siteUrl
+            }
+            status
+            progress
+            progressVolumes
+          }
+        }
+      }
+    }
+  `;
+
+  const response = await fetch('https://graphql.anilist.co', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+    },
+    body: JSON.stringify({
+      query,
+      variables: { username },
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`AniList API error: ${response.status}`);
+  }
+
+  const result = (await response.json()) as AniListResponse;
+
+  if (!result.data) {
+    throw new Error('User not found or list is private');
+  }
+
+  // Map AniList status to Waypoint status
+  const statusMap: Record<string, WorkStatus> = {
+    CURRENT: 'watching', // Will be adjusted for manga
+    COMPLETED: 'completed',
+    PAUSED: 'paused',
+    DROPPED: 'dropped',
+    PLANNING: 'paused',
+    REPEATING: 'watching',
+  };
+
+  let imported = 0;
+  let skipped = 0;
+
+  // Process anime entries
+  const animeEntries = result.data.anime?.lists?.flatMap((list) => list.entries) ?? [];
+  for (const entry of animeEntries) {
+    const title = entry.media.title.userPreferred || entry.media.title.romaji || entry.media.title.english || 'Untitled';
+    let status = statusMap[entry.status] || 'watching';
+
+    // Create work
+    const work = await createWork({
+      title,
+      type: 'anime',
+      status,
+    });
+
+    // Create waypoint if progress exists
+    if (entry.progress && entry.progress > 0) {
+      await createWaypoint({
+        workId: work.id,
+        episode: entry.progress,
+        sourceUrl: entry.media.siteUrl,
+      });
+    }
+
+    imported++;
+  }
+
+  // Process manga entries
+  const mangaEntries = result.data.manga?.lists?.flatMap((list) => list.entries) ?? [];
+  for (const entry of mangaEntries) {
+    const title = entry.media.title.userPreferred || entry.media.title.romaji || entry.media.title.english || 'Untitled';
+    let status = statusMap[entry.status] || 'reading';
+
+    // Adjust status for manga (CURRENT -> reading)
+    if (status === 'watching') {
+      status = 'reading';
+    }
+
+    // Create work
+    const work = await createWork({
+      title,
+      type: 'manga',
+      status,
+    });
+
+    // Create waypoint if progress exists
+    if (entry.progress && entry.progress > 0) {
+      await createWaypoint({
+        workId: work.id,
+        chapter: entry.progress,
+        sourceUrl: entry.media.siteUrl,
+      });
+    }
+
+    imported++;
+  }
+
+  return { imported, skipped };
+}
+
+/**
+ * Import data from MyAnimeList XML export
+ * Users can export their list from MAL: Profile > Export
+ */
+export async function importMAL(xmlContent: string): Promise<{ imported: number; skipped: number }> {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(xmlContent, 'text/xml');
+
+  // Check for parse errors
+  const parseError = doc.querySelector('parsererror');
+  if (parseError) {
+    throw new Error('Invalid XML format');
+  }
+
+  // Map MAL status to Waypoint status
+  const animeStatusMap: Record<string, WorkStatus> = {
+    'Watching': 'watching',
+    'Completed': 'completed',
+    'On-Hold': 'paused',
+    'Dropped': 'dropped',
+    'Plan to Watch': 'paused',
+  };
+
+  const mangaStatusMap: Record<string, WorkStatus> = {
+    'Reading': 'reading',
+    'Completed': 'completed',
+    'On-Hold': 'paused',
+    'Dropped': 'dropped',
+    'Plan to Read': 'paused',
+  };
+
+  let imported = 0;
+  let skipped = 0;
+
+  // Process anime entries
+  const animeEntries = doc.querySelectorAll('anime');
+  for (const entry of animeEntries) {
+    const title = entry.querySelector('series_title')?.textContent;
+    if (!title) {
+      skipped++;
+      continue;
+    }
+
+    const statusText = entry.querySelector('my_status')?.textContent || 'Watching';
+    const status = animeStatusMap[statusText] || 'watching';
+    const progress = parseInt(entry.querySelector('my_watched_episodes')?.textContent || '0', 10);
+
+    // Create work
+    const work = await createWork({
+      title,
+      type: 'anime',
+      status,
+    });
+
+    // Create waypoint if progress exists
+    if (progress > 0) {
+      await createWaypoint({
+        workId: work.id,
+        episode: progress,
+      });
+    }
+
+    imported++;
+  }
+
+  // Process manga entries
+  const mangaEntries = doc.querySelectorAll('manga');
+  for (const entry of mangaEntries) {
+    const title = entry.querySelector('manga_title')?.textContent;
+    if (!title) {
+      skipped++;
+      continue;
+    }
+
+    const statusText = entry.querySelector('my_status')?.textContent || 'Reading';
+    const status = mangaStatusMap[statusText] || 'reading';
+    const progress = parseInt(entry.querySelector('my_read_chapters')?.textContent || '0', 10);
+
+    // Create work
+    const work = await createWork({
+      title,
+      type: 'manga',
+      status,
+    });
+
+    // Create waypoint if progress exists
+    if (progress > 0) {
+      await createWaypoint({
+        workId: work.id,
+        chapter: progress,
       });
     }
 

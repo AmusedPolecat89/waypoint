@@ -13,6 +13,115 @@ import {
 } from '@/lib/storage';
 import { formatProgress, formatRelativeTime } from '@/lib/utils';
 
+/**
+ * Toast notification types
+ */
+type ToastType = 'success' | 'error' | 'info';
+
+interface Toast {
+  id: number;
+  message: string;
+  type: ToastType;
+}
+
+let toastId = 0;
+
+/**
+ * Hook to manage toast notifications
+ */
+function useToasts() {
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
+  const addToast = useCallback((message: string, type: ToastType = 'success') => {
+    const id = ++toastId;
+    setToasts((prev) => [...prev, { id, message, type }]);
+
+    // Auto-dismiss after 3 seconds
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 3000);
+  }, []);
+
+  const removeToast = useCallback((id: number) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  return { toasts, addToast, removeToast };
+}
+
+/**
+ * Toast notification component
+ */
+function ToastContainer({ toasts, onRemove }: { toasts: Toast[]; onRemove: (id: number) => void }) {
+  if (toasts.length === 0) return null;
+
+  return (
+    <div class="fixed bottom-4 left-4 right-4 z-50 flex flex-col gap-2">
+      {toasts.map((toast) => (
+        <div
+          key={toast.id}
+          class={`p-3 rounded-md shadow-lg text-sm flex items-center justify-between animate-slide-up ${
+            toast.type === 'success'
+              ? 'bg-green-600 text-white'
+              : toast.type === 'error'
+              ? 'bg-red-600 text-white'
+              : 'bg-surface-secondary text-text border border-border'
+          }`}
+        >
+          <span>{toast.message}</span>
+          <button
+            onClick={() => onRemove(toast.id)}
+            class="ml-2 opacity-70 hover:opacity-100"
+          >
+            ×
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Hook to trap focus within a container element.
+ * Useful for forms and modal-like views.
+ */
+function useFocusTrap(containerRef: { current: HTMLElement | null }) {
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key !== 'Tab') return;
+
+      const focusableElements = container!.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      );
+
+      if (focusableElements.length === 0) return;
+
+      const firstElement = focusableElements[0];
+      const lastElement = focusableElements[focusableElements.length - 1];
+
+      if (e.shiftKey) {
+        // Shift+Tab: if on first element, go to last
+        if (document.activeElement === firstElement) {
+          e.preventDefault();
+          lastElement.focus();
+        }
+      } else {
+        // Tab: if on last element, go to first
+        if (document.activeElement === lastElement) {
+          e.preventDefault();
+          firstElement.focus();
+        }
+      }
+    }
+
+    container.addEventListener('keydown', handleKeyDown);
+    return () => container.removeEventListener('keydown', handleKeyDown);
+  }, [containerRef]);
+}
+
 interface WorkWithProgress extends Work {
   progress?: string;
   latestWaypoint?: Waypoint;
@@ -37,6 +146,7 @@ export function App() {
   const [sortBy, setSortBy] = useState<SortOption>('updated');
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const { toasts, addToast, removeToast } = useToasts();
 
   useEffect(() => {
     loadWorks();
@@ -165,6 +275,7 @@ export function App() {
     });
     await loadWorks();
     setView({ type: 'list' });
+    addToast(`Added "${data.title}"`);
   }
 
   async function handleUpdateWork(
@@ -174,12 +285,14 @@ export function App() {
     await updateWork(id, data);
     await loadWorks();
     setView({ type: 'list' });
+    addToast('Work updated');
   }
 
   async function handleDeleteWork(id: string) {
     await deleteWork(id);
     await loadWorks();
     setView({ type: 'list' });
+    addToast('Work deleted');
   }
 
   async function handleQuickStatusChange(id: string, status: WorkStatus) {
@@ -209,6 +322,7 @@ export function App() {
         },
       });
     }
+    addToast('Waypoint saved');
   }
 
   async function handleUpdateWaypoint(
@@ -231,6 +345,7 @@ export function App() {
         },
       });
     }
+    addToast('Waypoint updated');
   }
 
   async function handleDeleteWaypoint(waypointId: string, workId: string) {
@@ -249,6 +364,7 @@ export function App() {
         },
       });
     }
+    addToast('Waypoint deleted');
   }
 
   function openOptions() {
@@ -258,7 +374,8 @@ export function App() {
   const hasFilters = search || statusFilter !== 'all' || typeFilter !== 'all';
 
   return (
-    <div class="w-80 min-h-[200px] max-h-[500px] flex flex-col bg-surface text-text">
+    <div class="w-80 min-h-[200px] max-h-[500px] flex flex-col bg-surface text-text relative">
+      <ToastContainer toasts={toasts} onRemove={removeToast} />
       {view.type === 'list' && (
         <>
           <Header
@@ -568,6 +685,9 @@ function AddWorkForm({
 }) {
   const [title, setTitle] = useState('');
   const [type, setType] = useState<MediaType>('manga');
+  const formRef = useRef<HTMLFormElement>(null);
+
+  useFocusTrap(formRef);
 
   function handleSubmit(e: Event) {
     e.preventDefault();
@@ -576,7 +696,7 @@ function AddWorkForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} class="flex flex-col h-full">
+    <form ref={formRef} onSubmit={handleSubmit} class="flex flex-col h-full">
       <header class="flex items-center justify-between px-4 py-3 border-b border-border">
         <button
           type="button"
@@ -644,6 +764,9 @@ function EditWorkForm({
   const [title, setTitle] = useState(work.title);
   const [type, setType] = useState<MediaType>(work.type);
   const [status, setStatus] = useState<WorkStatus>(work.status);
+  const formRef = useRef<HTMLFormElement>(null);
+
+  useFocusTrap(formRef);
 
   function handleSubmit(e: Event) {
     e.preventDefault();
@@ -652,7 +775,7 @@ function EditWorkForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} class="flex flex-col h-full">
+    <form ref={formRef} onSubmit={handleSubmit} class="flex flex-col h-full">
       <header class="flex items-center justify-between px-4 py-3 border-b border-border">
         <button
           type="button"
@@ -679,6 +802,7 @@ function EditWorkForm({
             value={title}
             onInput={(e) => setTitle((e.target as HTMLInputElement).value)}
             class="w-full px-3 py-2 text-sm border border-border rounded-md bg-surface focus:outline-none focus:border-accent"
+            autoFocus
           />
         </div>
 
@@ -1042,6 +1166,9 @@ function EditWaypointForm({
   const [note, setNote] = useState(waypoint.note ?? '');
   const [sourceUrl, setSourceUrl] = useState(waypoint.sourceUrl ?? '');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useFocusTrap(containerRef);
 
   function handleSubmit(e: Event) {
     e.preventDefault();
@@ -1061,7 +1188,7 @@ function EditWaypointForm({
   }
 
   return (
-    <div class="flex flex-col h-full">
+    <div ref={containerRef} class="flex flex-col h-full">
       <header class="flex items-center justify-between px-4 py-3 border-b border-border">
         <button
           type="button"

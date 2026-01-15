@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'preact/hooks';
-import { exportData, importData, importCSV, loadStore, saveStore } from '@/lib/storage';
+import { exportData, importData, importCSV, importAniList, importMAL, loadStore, saveStore } from '@/lib/storage';
 import { createEmptyStore } from '@/lib/types';
 import { type Theme, setTheme, applyTheme, initTheme } from '@/lib/theme';
 
@@ -12,6 +12,8 @@ export function App() {
     waypointsCount: number;
     bytesUsed: number;
   } | null>(null);
+  const [aniListUsername, setAniListUsername] = useState('');
+  const [isImporting, setIsImporting] = useState(false);
 
   useEffect(() => {
     initTheme().then(setCurrentTheme);
@@ -95,6 +97,52 @@ export function App() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Invalid CSV format.';
       setMessage(`Failed to import CSV: ${msg}`);
+    }
+
+    input.value = '';
+  }
+
+  async function handleAniListImport() {
+    if (!aniListUsername.trim()) {
+      setMessage('Please enter an AniList username.');
+      return;
+    }
+
+    setIsImporting(true);
+    try {
+      const result = await importAniList(aniListUsername.trim());
+      setMessage(
+        `Imported ${result.imported} entries from AniList.${result.skipped > 0 ? ` Skipped ${result.skipped}.` : ''}`
+      );
+      setAniListUsername('');
+      await loadStorageInfo();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to fetch from AniList.';
+      setMessage(`AniList import failed: ${msg}`);
+    } finally {
+      setIsImporting(false);
+    }
+  }
+
+  async function handleMALImport(event: Event) {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+
+    if (!file) return;
+
+    setIsImporting(true);
+    try {
+      const text = await file.text();
+      const result = await importMAL(text);
+      setMessage(
+        `Imported ${result.imported} entries from MyAnimeList.${result.skipped > 0 ? ` Skipped ${result.skipped}.` : ''}`
+      );
+      await loadStorageInfo();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Invalid MAL XML format.';
+      setMessage(`MAL import failed: ${msg}`);
+    } finally {
+      setIsImporting(false);
     }
 
     input.value = '';
@@ -240,6 +288,50 @@ export function App() {
                   accept=".csv"
                   onChange={handleCSVImport}
                   class="hidden"
+                />
+              </label>
+            </div>
+
+            {/* Import from AniList */}
+            <div class="p-4 border border-border rounded-md">
+              <h3 class="font-medium mb-1">Import from AniList</h3>
+              <p class="text-sm text-text-secondary mb-3">
+                Import your anime and manga lists from AniList. Your list must be public.
+              </p>
+              <div class="flex gap-2">
+                <input
+                  type="text"
+                  value={aniListUsername}
+                  onInput={(e) => setAniListUsername((e.target as HTMLInputElement).value)}
+                  placeholder="AniList username"
+                  class="flex-1 px-3 py-2 text-sm border border-border rounded-md bg-surface focus:outline-none focus:border-accent"
+                  disabled={isImporting}
+                />
+                <button
+                  onClick={handleAniListImport}
+                  disabled={isImporting || !aniListUsername.trim()}
+                  class="px-4 py-2 bg-accent text-white text-sm rounded-md hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isImporting ? 'Importing...' : 'Import'}
+                </button>
+              </div>
+            </div>
+
+            {/* Import from MyAnimeList */}
+            <div class="p-4 border border-border rounded-md">
+              <h3 class="font-medium mb-1">Import from MyAnimeList</h3>
+              <p class="text-sm text-text-secondary mb-3">
+                Import your anime and manga lists from a MAL XML export.
+                Export from MAL: Profile → List → Export.
+              </p>
+              <label class={`inline-block px-4 py-2 bg-surface-tertiary text-sm rounded-md cursor-pointer hover:bg-border transition-colors ${isImporting ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                {isImporting ? 'Importing...' : 'Choose XML File'}
+                <input
+                  type="file"
+                  accept=".xml,.gz"
+                  onChange={handleMALImport}
+                  class="hidden"
+                  disabled={isImporting}
                 />
               </label>
             </div>

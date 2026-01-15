@@ -4,7 +4,9 @@
   "description": "Remember where you left off.",
   "version": "0.1.0",
   "permissions": [
-    "storage"
+    "storage",
+    "contextMenus",
+    "tabs"
   ],
   "optional_permissions": [
     "identity"
