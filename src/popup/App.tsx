@@ -10,7 +10,7 @@ import {
   updateWaypoint,
   deleteWaypoint,
 } from '@/lib/storage';
-import { formatProgress } from '@/lib/utils';
+import { formatProgress, isSameWork } from '@/lib/utils';
 import {
   getDomain,
   detectMediaType,
@@ -30,6 +30,7 @@ import {
   EditWorkForm,
   WorkDetail,
   EditWaypointForm,
+  SkeletonLoader,
 } from './components';
 
 export function App() {
@@ -41,6 +42,8 @@ export function App() {
   const [typeFilter, setTypeFilter] = useState<MediaType | 'all'>('all');
   const [sortBy, setSortBy] = useState<SortOption>('updated');
   const [selectedIndex, setSelectedIndex] = useState(-1);
+  const [compactMode, setCompactMode] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const { toasts, addToast, removeToast } = useToasts();
 
@@ -180,6 +183,7 @@ export function App() {
   }
 
   // Detect if current tab matches any existing work
+  // Uses both URL-based and title-based matching for cross-site detection
   useEffect(() => {
     if (!currentTab?.url || works.length === 0) {
       setMatchedWork(null);
@@ -187,23 +191,37 @@ export function App() {
     }
 
     const currentDomain = getDomain(currentTab.url);
+    const currentTitle = extractTitle(currentTab.title, currentTab.url);
 
-    const matched = works.find((work) => {
+    // First, try URL-based matching (exact or same domain/path)
+    let matched = works.find((work) => {
       if (!work.latestWaypoint?.sourceUrl) return false;
       const workDomain = getDomain(work.latestWaypoint.sourceUrl);
 
+      // Exact URL match
       if (work.latestWaypoint.sourceUrl === currentTab.url) return true;
+
+      // Same domain with matching path structure
       if (currentDomain === workDomain) {
-        const currentPath = new URL(currentTab.url).pathname.toLowerCase();
-        const workPath = new URL(work.latestWaypoint.sourceUrl).pathname.toLowerCase();
-        const currentParts = currentPath.split('/').filter(Boolean);
-        const workParts = workPath.split('/').filter(Boolean);
-        if (currentParts.length >= 2 && workParts.length >= 2) {
-          return currentParts[0] === workParts[0] && currentParts[1] === workParts[1];
+        try {
+          const currentPath = new URL(currentTab.url).pathname.toLowerCase();
+          const workPath = new URL(work.latestWaypoint.sourceUrl).pathname.toLowerCase();
+          const currentParts = currentPath.split('/').filter(Boolean);
+          const workParts = workPath.split('/').filter(Boolean);
+          if (currentParts.length >= 2 && workParts.length >= 2) {
+            return currentParts[0] === workParts[0] && currentParts[1] === workParts[1];
+          }
+        } catch {
+          // Invalid URL, skip
         }
       }
       return false;
     });
+
+    // If no URL match, try title-based matching (cross-site detection)
+    if (!matched && currentTitle) {
+      matched = works.find((work) => isSameWork(work.title, currentTitle));
+    }
 
     setMatchedWork(matched ?? null);
   }, [currentTab, works]);
@@ -485,11 +503,29 @@ export function App() {
   const hasFilters = search || statusFilter !== 'all' || typeFilter !== 'all';
 
   return (
-    <div class="w-80 min-h-[200px] max-h-[500px] flex flex-col bg-surface text-text relative">
+    <div
+      class="w-[400px] min-h-[200px] max-h-[600px] flex flex-col bg-surface text-text relative"
+      role="application"
+      aria-label="Waypoint - Media Progress Tracker"
+    >
+      {/* Skip to main content link for screen readers */}
+      <a href="#main-content" class="skip-link">
+        Skip to content
+      </a>
+
+      {/* Live region for announcements */}
+      <div
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        class="sr-only"
+        id="announcer"
+      />
+
       <ToastContainer toasts={toasts} onRemove={removeToast} />
 
       {view.type === 'list' && (
-        <>
+        <div class="animate-fade-in flex flex-col flex-1 min-h-0">
           <Header
             onAdd={() => setView({ type: 'add' })}
             onSettings={openOptions}
@@ -505,70 +541,151 @@ export function App() {
           )}
 
           {!loading && works.length > 0 && (
-            <div class="px-4 pt-3 pb-2 border-b border-border space-y-2">
-              <input
-                ref={searchInputRef}
-                type="text"
-                value={search}
-                onInput={(e) => setSearch((e.target as HTMLInputElement).value)}
-                placeholder="Search works... (/ to focus)"
-                class="w-full px-3 py-1.5 text-sm border border-border rounded-md bg-surface focus:outline-none focus:border-accent"
-              />
+            <div class="px-4 pt-3 pb-2 border-b border-border space-y-2" role="search">
+              {/* Search and controls row */}
               <div class="flex gap-2">
-                <select
-                  value={statusFilter}
-                  onChange={(e) =>
-                    setStatusFilter((e.target as HTMLSelectElement).value as WorkStatus | 'all')
-                  }
-                  class="flex-1 px-2 py-1 text-xs border border-border rounded bg-surface focus:outline-none focus:border-accent"
+                <label class="sr-only" htmlFor="search-works">Search works</label>
+                <input
+                  id="search-works"
+                  ref={searchInputRef}
+                  type="search"
+                  value={search}
+                  onInput={(e) => setSearch((e.target as HTMLInputElement).value)}
+                  placeholder="Search... (/)"
+                  aria-label="Search works (press / to focus)"
+                  class="flex-1 px-3 py-1.5 text-sm border border-border rounded-md bg-surface focus:outline-none focus:border-accent"
+                />
+                <button
+                  onClick={() => setShowFilters(!showFilters)}
+                  class={`px-2 py-1.5 rounded-md border transition-colors flex items-center gap-1 ${
+                    showFilters || hasFilters
+                      ? 'border-accent bg-accent-subtle text-accent'
+                      : 'border-border hover:bg-surface-secondary text-text-secondary'
+                  }`}
+                  aria-label={`${showFilters ? 'Hide' : 'Show'} filters${hasFilters ? ' (filters active)' : ''}`}
+                  aria-expanded={showFilters}
+                  aria-controls="filter-panel"
                 >
-                  <option value="all">All Status</option>
-                  <option value="reading">Reading</option>
-                  <option value="watching">Watching</option>
-                  <option value="paused">Paused</option>
-                  <option value="completed">Completed</option>
-                  <option value="dropped">Dropped</option>
-                </select>
-                <select
-                  value={typeFilter}
-                  onChange={(e) =>
-                    setTypeFilter((e.target as HTMLSelectElement).value as MediaType | 'all')
-                  }
-                  class="flex-1 px-2 py-1 text-xs border border-border rounded bg-surface focus:outline-none focus:border-accent"
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+                  </svg>
+                  {hasFilters && <span class="text-xs font-medium" aria-hidden="true">•</span>}
+                </button>
+                <button
+                  onClick={() => setCompactMode(!compactMode)}
+                  class={`p-1.5 rounded-md border transition-colors ${
+                    compactMode
+                      ? 'border-accent bg-accent-subtle text-accent'
+                      : 'border-border hover:bg-surface-secondary text-text-secondary'
+                  }`}
+                  aria-label={compactMode ? 'Switch to normal view' : 'Switch to compact view'}
+                  aria-pressed={compactMode}
                 >
-                  <option value="all">All Types</option>
-                  <option value="manga">Manga</option>
-                  <option value="novel">Novel</option>
-                  <option value="webcomic">Webcomic</option>
-                  <option value="anime">Anime</option>
-                </select>
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                    {compactMode ? (
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+                    ) : (
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+                    )}
+                  </svg>
+                </button>
               </div>
-              <div class="flex items-center justify-between">
-                <span class="text-xs text-text-tertiary">
-                  {filteredWorks.length} of {works.length} works
-                </span>
-                <select
-                  value={sortBy}
-                  onChange={(e) =>
-                    setSortBy((e.target as HTMLSelectElement).value as SortOption)
-                  }
-                  class="px-2 py-1 text-xs border border-border rounded bg-surface focus:outline-none focus:border-accent"
-                >
-                  <option value="updated">Recently Updated</option>
-                  <option value="title">Title A-Z</option>
-                  <option value="created">Recently Added</option>
-                </select>
+
+              {/* Collapsible filter chips */}
+              {showFilters && (
+                <div id="filter-panel" class="space-y-2 pt-1" role="group" aria-label="Filter options">
+                  {/* Status chips */}
+                  <div class="flex flex-wrap gap-1" role="radiogroup" aria-label="Filter by status">
+                    <span class="text-[10px] text-text-tertiary uppercase tracking-wide mr-1 self-center" id="status-label">Status:</span>
+                    {(['all', 'reading', 'watching', 'paused', 'completed', 'dropped'] as const).map((status) => (
+                      <button
+                        key={status}
+                        onClick={() => setStatusFilter(status)}
+                        role="radio"
+                        aria-checked={statusFilter === status}
+                        class={`px-2 py-0.5 text-xs rounded-full transition-colors capitalize ${
+                          statusFilter === status
+                            ? 'bg-accent text-white'
+                            : 'bg-surface-tertiary text-text-secondary hover:bg-border'
+                        }`}
+                      >
+                        {status === 'all' ? 'All' : status}
+                      </button>
+                    ))}
+                  </div>
+                  {/* Type chips */}
+                  <div class="flex flex-wrap gap-1" role="radiogroup" aria-label="Filter by type">
+                    <span class="text-[10px] text-text-tertiary uppercase tracking-wide mr-1 self-center">Type:</span>
+                    {(['all', 'manga', 'anime', 'novel', 'webcomic'] as const).map((type) => (
+                      <button
+                        key={type}
+                        onClick={() => setTypeFilter(type)}
+                        role="radio"
+                        aria-checked={typeFilter === type}
+                        class={`px-2 py-0.5 text-xs rounded-full transition-colors capitalize ${
+                          typeFilter === type
+                            ? 'bg-accent text-white'
+                            : 'bg-surface-tertiary text-text-secondary hover:bg-border'
+                        }`}
+                      >
+                        {type === 'all' ? 'All' : type}
+                      </button>
+                    ))}
+                  </div>
+                  {/* Sort chips */}
+                  <div class="flex flex-wrap gap-1" role="radiogroup" aria-label="Sort by">
+                    <span class="text-[10px] text-text-tertiary uppercase tracking-wide mr-1 self-center">Sort:</span>
+                    {([
+                      { value: 'updated', label: 'Updated' },
+                      { value: 'title', label: 'Title' },
+                      { value: 'created', label: 'Added' },
+                    ] as const).map((opt) => (
+                      <button
+                        key={opt.value}
+                        onClick={() => setSortBy(opt.value)}
+                        role="radio"
+                        aria-checked={sortBy === opt.value}
+                        class={`px-2 py-0.5 text-xs rounded-full transition-colors ${
+                          sortBy === opt.value
+                            ? 'bg-accent text-white'
+                            : 'bg-surface-tertiary text-text-secondary hover:bg-border'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Results count */}
+              <div class="flex items-center justify-between text-xs text-text-tertiary">
+                <span>{filteredWorks.length} of {works.length} works</span>
+                {hasFilters && !showFilters && (
+                  <button
+                    onClick={() => {
+                      setSearch('');
+                      setStatusFilter('all');
+                      setTypeFilter('all');
+                    }}
+                    class="text-accent hover:text-accent-hover"
+                  >
+                    Clear filters
+                  </button>
+                )}
               </div>
             </div>
           )}
 
-          <main class="flex-1 overflow-y-auto p-4">
+          <main id="main-content" class="flex-1 overflow-y-auto p-4" aria-label="Works list">
             {loading ? (
-              <p class="text-text-secondary text-sm">Loading...</p>
+              <div aria-busy="true" aria-label="Loading works">
+                <SkeletonLoader count={4} compact={compactMode} />
+              </div>
             ) : works.length === 0 ? (
               <EmptyState onAdd={() => setView({ type: 'add' })} />
             ) : filteredWorks.length === 0 ? (
-              <div class="text-center py-8">
+              <div class="text-center py-8" role="status">
                 <p class="text-text-secondary text-sm">No matching works</p>
                 {hasFilters && (
                   <button
@@ -587,52 +704,61 @@ export function App() {
               <WorkList
                 works={filteredWorks}
                 selectedIndex={selectedIndex}
+                compact={compactMode}
                 onSelect={(work) => setView({ type: 'detail', work })}
                 onStatusChange={handleQuickStatusChange}
               />
             )}
           </main>
-        </>
+        </div>
       )}
 
       {view.type === 'add' && (
-        <AddWorkForm
-          onSubmit={handleAddWork}
-          onCancel={() => setView({ type: 'list' })}
-        />
+        <div class="animate-slide-up flex flex-col flex-1">
+          <AddWorkForm
+            onSubmit={handleAddWork}
+            onCancel={() => setView({ type: 'list' })}
+          />
+        </div>
       )}
 
       {view.type === 'detail' && (
-        <WorkDetail
-          work={view.work}
-          onBack={() => setView({ type: 'list' })}
-          onEdit={() => setView({ type: 'edit', work: view.work })}
-          onDelete={() => handleDeleteWork(view.work.id)}
-          onSetWaypoint={(data) => handleSetWaypoint(view.work.id, data)}
-          onEditWaypoint={(waypoint) =>
-            setView({ type: 'edit-waypoint', work: view.work, waypoint })
-          }
-        />
+        <div class="animate-slide-in-right flex flex-col flex-1">
+          <WorkDetail
+            work={view.work}
+            onBack={() => setView({ type: 'list' })}
+            onEdit={() => setView({ type: 'edit', work: view.work })}
+            onDelete={() => handleDeleteWork(view.work.id)}
+            onSetWaypoint={(data) => handleSetWaypoint(view.work.id, data)}
+            onEditWaypoint={(waypoint) =>
+              setView({ type: 'edit-waypoint', work: view.work, waypoint })
+            }
+          />
+        </div>
       )}
 
       {view.type === 'edit' && (
-        <EditWorkForm
-          work={view.work}
-          onSubmit={(data) => handleUpdateWork(view.work.id, data)}
-          onCancel={() => setView({ type: 'detail', work: view.work })}
-        />
+        <div class="animate-scale-in flex flex-col flex-1">
+          <EditWorkForm
+            work={view.work}
+            onSubmit={(data) => handleUpdateWork(view.work.id, data)}
+            onCancel={() => setView({ type: 'detail', work: view.work })}
+          />
+        </div>
       )}
 
       {view.type === 'edit-waypoint' && (
-        <EditWaypointForm
-          waypoint={view.waypoint}
-          work={view.work}
-          onSubmit={(data) =>
-            handleUpdateWaypoint(view.waypoint.id, view.work.id, data)
-          }
-          onDelete={() => handleDeleteWaypoint(view.waypoint.id, view.work.id)}
-          onCancel={() => setView({ type: 'detail', work: view.work })}
-        />
+        <div class="animate-scale-in flex flex-col flex-1">
+          <EditWaypointForm
+            waypoint={view.waypoint}
+            work={view.work}
+            onSubmit={(data) =>
+              handleUpdateWaypoint(view.waypoint.id, view.work.id, data)
+            }
+            onDelete={() => handleDeleteWaypoint(view.waypoint.id, view.work.id)}
+            onCancel={() => setView({ type: 'detail', work: view.work })}
+          />
+        </div>
       )}
     </div>
   );

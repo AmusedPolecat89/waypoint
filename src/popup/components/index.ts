@@ -7,3 +7,4 @@ export { AddWorkForm } from './AddWorkForm';
 export { EditWorkForm } from './EditWorkForm';
 export { WorkDetail } from './WorkDetail';
 export { EditWaypointForm } from './EditWaypointForm';
+export { SkeletonLoader } from './SkeletonLoader';

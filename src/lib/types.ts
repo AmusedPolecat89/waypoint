@@ -20,6 +20,11 @@ export interface Work {
   status: WorkStatus;
   createdAt: number;
   updatedAt: number;
+
+  // Optional metadata from external services
+  thumbnailUrl?: string;
+  externalId?: string; // External service ID (string to support various formats)
+  externalSource?: 'anilist' | 'mal' | 'mangadex' | 'openlibrary';
 }
 
 /**
@@ -33,6 +38,8 @@ export interface Waypoint {
   // Progress indicators (use what's relevant for the media type)
   chapter?: number;
   episode?: number;
+  issue?: number; // For comics/manga published in issues
+  volume?: number; // For tracking volume number
   timestamp?: number; // seconds, for video
   percentage?: number; // 0-100
   page?: number;

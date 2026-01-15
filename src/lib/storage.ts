@@ -7,7 +7,8 @@
 
 import type { WaypointStore, Work, Waypoint, WorkStatus } from './types';
 import { createEmptyStore } from './types';
-import { generateId, now } from './utils';
+import { generateId, now, cleanTitle } from './utils';
+import { searchMetadata } from './metadata';
 
 const STORAGE_KEY = 'waypoint_store';
 
@@ -28,21 +29,103 @@ export async function saveStore(store: WaypointStore): Promise<void> {
 
 /**
  * Create a new Work
+ * Optionally fetches metadata (thumbnail) from external services
  */
 export async function createWork(
-  data: Omit<Work, 'id' | 'createdAt' | 'updatedAt'>
+  data: Omit<Work, 'id' | 'createdAt' | 'updatedAt'>,
+  options: { fetchMetadata?: boolean } = { fetchMetadata: true }
 ): Promise<Work> {
   const store = await loadStore();
   const timestamp = now();
 
+  // Clean the title to remove junk like "in English Online", "Volume 1", etc.
+  const originalTitle = data.title;
+  const cleanedTitle = cleanTitle(data.title);
+
   const work: Work = {
     ...data,
+    title: cleanedTitle,
     id: generateId(),
     createdAt: timestamp,
     updatedAt: timestamp,
   };
 
   store.works[work.id] = work;
+  await saveStore(store);
+
+  // Fetch metadata in background (don't block work creation)
+  // Use original title for search in case cleaned version is too short
+  if (options.fetchMetadata) {
+    fetchAndUpdateMetadata(work.id, originalTitle, work.type).catch(() => {
+      // Silently ignore metadata fetch failures
+    });
+  }
+
+  return work;
+}
+
+/**
+ * Fetch metadata from external services and update the work
+ */
+export async function fetchAndUpdateMetadata(
+  workId: string,
+  title: string,
+  type: Work['type']
+): Promise<Work | null> {
+  const metadata = await searchMetadata(title, type);
+
+  if (!metadata) {
+    return null;
+  }
+
+  const store = await loadStore();
+  const work = store.works[workId];
+
+  if (!work) {
+    return null;
+  }
+
+  // Only update if we don't already have metadata
+  if (!work.thumbnailUrl) {
+    // Use the properly capitalized title from the API
+    work.title = metadata.title;
+    work.thumbnailUrl = metadata.thumbnailUrl;
+    work.externalId = metadata.id;
+    work.externalSource = metadata.source;
+    work.updatedAt = now();
+
+    store.works[workId] = work;
+    await saveStore(store);
+  }
+
+  return work;
+}
+
+/**
+ * Manually refresh metadata for a work
+ */
+export async function refreshWorkMetadata(workId: string): Promise<Work | null> {
+  const store = await loadStore();
+  const work = store.works[workId];
+
+  if (!work) {
+    return null;
+  }
+
+  const metadata = await searchMetadata(work.title, work.type);
+
+  if (!metadata) {
+    return null;
+  }
+
+  // Use the properly capitalized title from the API
+  work.title = metadata.title;
+  work.thumbnailUrl = metadata.thumbnailUrl;
+  work.externalId = metadata.id;
+  work.externalSource = metadata.source;
+  work.updatedAt = now();
+
+  store.works[workId] = work;
   await saveStore(store);
 
   return work;
@@ -164,6 +247,41 @@ export async function getWaypoints(workId: string): Promise<Waypoint[]> {
   return Object.values(store.waypoints)
     .filter((wp) => wp.workId === workId)
     .sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+/**
+ * Get recent unique source URLs for a work (from waypoint history)
+ * Returns up to `limit` unique domains/sources, most recent first
+ */
+export async function getRecentSources(workId: string, limit = 3): Promise<Array<{ url: string; domain: string; lastUsed: number }>> {
+  const waypoints = await getWaypoints(workId);
+  const seen = new Set<string>();
+  const sources: Array<{ url: string; domain: string; lastUsed: number }> = [];
+
+  for (const wp of waypoints) {
+    if (!wp.sourceUrl) continue;
+
+    try {
+      const url = new URL(wp.sourceUrl);
+      const domain = url.hostname.replace(/^www\./, '');
+
+      // Skip if we already have this domain
+      if (seen.has(domain)) continue;
+      seen.add(domain);
+
+      sources.push({
+        url: wp.sourceUrl,
+        domain,
+        lastUsed: wp.updatedAt,
+      });
+
+      if (sources.length >= limit) break;
+    } catch {
+      // Invalid URL, skip
+    }
+  }
+
+  return sources;
 }
 
 /**
