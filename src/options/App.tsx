@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'preact/hooks';
-import { exportData, importData, loadStore, saveStore } from '@/lib/storage';
+import { exportData, importData, importCSV, loadStore, saveStore } from '@/lib/storage';
 import { createEmptyStore } from '@/lib/types';
 import { type Theme, setTheme, applyTheme, initTheme } from '@/lib/theme';
 
@@ -74,6 +74,27 @@ export function App() {
       await loadStorageInfo();
     } catch {
       setMessage('Failed to import data. Invalid format.');
+    }
+
+    input.value = '';
+  }
+
+  async function handleCSVImport(event: Event) {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const result = await importCSV(text);
+      setMessage(
+        `Imported ${result.imported} works.${result.skipped > 0 ? ` Skipped ${result.skipped} rows.` : ''}`
+      );
+      await loadStorageInfo();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Invalid CSV format.';
+      setMessage(`Failed to import CSV: ${msg}`);
     }
 
     input.value = '';
@@ -184,9 +205,9 @@ export function App() {
               </button>
             </div>
 
-            {/* Import */}
+            {/* Import JSON */}
             <div class="p-4 border border-border rounded-md">
-              <h3 class="font-medium mb-1">Import Data</h3>
+              <h3 class="font-medium mb-1">Import JSON</h3>
               <p class="text-sm text-text-secondary mb-3">
                 Import waypoints from a JSON backup. Existing data will be merged.
               </p>
@@ -196,6 +217,28 @@ export function App() {
                   type="file"
                   accept=".json"
                   onChange={handleImport}
+                  class="hidden"
+                />
+              </label>
+            </div>
+
+            {/* Import CSV */}
+            <div class="p-4 border border-border rounded-md">
+              <h3 class="font-medium mb-1">Import CSV</h3>
+              <p class="text-sm text-text-secondary mb-3">
+                Import works from a CSV file. Required column: <code class="text-xs bg-surface-tertiary px-1 rounded">title</code>.
+                Optional: <code class="text-xs bg-surface-tertiary px-1 rounded">type</code>,{' '}
+                <code class="text-xs bg-surface-tertiary px-1 rounded">status</code>,{' '}
+                <code class="text-xs bg-surface-tertiary px-1 rounded">progress</code>,{' '}
+                <code class="text-xs bg-surface-tertiary px-1 rounded">note</code>,{' '}
+                <code class="text-xs bg-surface-tertiary px-1 rounded">sourceUrl</code>.
+              </p>
+              <label class="inline-block px-4 py-2 bg-surface-tertiary text-sm rounded-md cursor-pointer hover:bg-border transition-colors">
+                Choose CSV
+                <input
+                  type="file"
+                  accept=".csv"
+                  onChange={handleCSVImport}
                   class="hidden"
                 />
               </label>

@@ -11,10 +11,10 @@
 
 ### Waypoints (Progress Tracking)
 - [x] Add "Set Waypoint" button/form
-- [ ] Add waypoint editing
+- [x] Add waypoint editing
 - [x] Add waypoint history view per work
 - [x] Add "Resume" action (open source URL if available)
-- [ ] Support all progress types (chapter, episode, page, timestamp, percentage)
+- [x] Support all progress types (chapter, episode, page, timestamp, percentage)
 - [x] Add notes to waypoints
 
 ### Sources
@@ -33,19 +33,19 @@
 - [x] Filter by status (reading, watching, paused, completed, dropped)
 - [x] Filter by type (novel, manga, webcomic, anime)
 - [x] Sort options (recently updated, title, date added)
-- [ ] Keyboard navigation
+- [x] Keyboard navigation
 - [x] Work count indicator
 
 ### Options Page
 - [x] Clear all data (with confirmation)
 - [x] Storage usage display
 - [x] Theme settings (light/dark/system)
-- [ ] Import from CSV
+- [x] Import from CSV
 - [ ] Import from AniList
 - [ ] Import from MyAnimeList
 
 ### Design Polish
-- [ ] Create proper PNG icons (16, 48, 128)
+- [x] Create proper PNG icons (16, 48, 128)
 - [ ] Empty state illustrations
 - [ ] Loading skeletons
 - [ ] Toast notifications for actions
@@ -87,7 +87,7 @@
 
 ## Accessibility
 
-- [ ] Keyboard navigation throughout
+- [x] Keyboard navigation throughout
 - [ ] Focus management in modals
 - [ ] Screen reader labels
 - [ ] Sufficient color contrast
@@ -136,16 +136,20 @@
 ### Completed
 - Core works management (CRUD)
 - Waypoint tracking with history
+- Waypoint editing and deletion
+- All progress types (chapter, episode, page, timestamp)
 - Resume functionality
 - Search, filter, and sort
 - Quick status toggle
 - Source URL support with "Use Current Tab"
 - Options page with storage stats and clear data
-- Export/import functionality
+- Export/import functionality (JSON and CSV)
 - Dark mode theme toggle (light/dark/system)
+- Proper PNG icons (16, 48, 128)
+- Keyboard navigation (↑↓ to select, Enter to open, Esc to go back, / to search, n to add)
 
 ### Next Priority
-1. Proper PNG icons
-2. CSV import
-3. Keyboard navigation
-4. Context menus
+1. Context menus ("Add to Waypoint", "Update waypoint")
+2. AniList/MyAnimeList import
+3. Focus management in modals
+4. Toast notifications

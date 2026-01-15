@@ -42,7 +42,17 @@ export function formatRelativeTime(timestamp: number): string {
 }
 
 /**
+ * Format a timestamp duration (seconds) as MM:SS
+ */
+export function formatTimestamp(seconds: number): string {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
+/**
  * Format progress for display based on available fields
+ * Shows multiple indicators when available (e.g., "Chapter 5, Page 23")
  */
 export function formatProgress(waypoint: {
   chapter?: number;
@@ -51,22 +61,23 @@ export function formatProgress(waypoint: {
   percentage?: number;
   timestamp?: number;
 }): string {
+  const parts: string[] = [];
+
   if (waypoint.chapter !== undefined) {
-    return `Chapter ${waypoint.chapter}`;
+    parts.push(`Ch. ${waypoint.chapter}`);
   }
   if (waypoint.episode !== undefined) {
-    return `Episode ${waypoint.episode}`;
+    parts.push(`Ep. ${waypoint.episode}`);
   }
   if (waypoint.page !== undefined) {
-    return `Page ${waypoint.page}`;
-  }
-  if (waypoint.percentage !== undefined) {
-    return `${waypoint.percentage}%`;
+    parts.push(`p. ${waypoint.page}`);
   }
   if (waypoint.timestamp !== undefined) {
-    const mins = Math.floor(waypoint.timestamp / 60);
-    const secs = waypoint.timestamp % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
+    parts.push(formatTimestamp(waypoint.timestamp));
   }
-  return 'No progress';
+  if (waypoint.percentage !== undefined) {
+    parts.push(`${waypoint.percentage}%`);
+  }
+
+  return parts.length > 0 ? parts.join(', ') : 'No progress';
 }

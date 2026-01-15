@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'preact/hooks';
+import { useState, useEffect, useRef, useCallback } from 'preact/hooks';
 import type { Work, Waypoint, MediaType, WorkStatus } from '@/lib/types';
 import {
   getWorks,
@@ -8,6 +8,8 @@ import {
   updateWork,
   deleteWork,
   createWaypoint,
+  updateWaypoint,
+  deleteWaypoint,
 } from '@/lib/storage';
 import { formatProgress, formatRelativeTime } from '@/lib/utils';
 
@@ -20,7 +22,8 @@ type View =
   | { type: 'list' }
   | { type: 'add' }
   | { type: 'detail'; work: WorkWithProgress }
-  | { type: 'edit'; work: WorkWithProgress };
+  | { type: 'edit'; work: WorkWithProgress }
+  | { type: 'edit-waypoint'; work: WorkWithProgress; waypoint: Waypoint };
 
 type SortOption = 'updated' | 'title' | 'created';
 
@@ -32,10 +35,17 @@ export function App() {
   const [statusFilter, setStatusFilter] = useState<WorkStatus | 'all'>('all');
   const [typeFilter, setTypeFilter] = useState<MediaType | 'all'>('all');
   const [sortBy, setSortBy] = useState<SortOption>('updated');
+  const [selectedIndex, setSelectedIndex] = useState(-1);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     loadWorks();
   }, []);
+
+  // Reset selection when filters change
+  useEffect(() => {
+    setSelectedIndex(-1);
+  }, [search, statusFilter, typeFilter, sortBy]);
 
   const filteredWorks = works
     .filter((work) => {
@@ -55,6 +65,78 @@ export function App() {
           return b.updatedAt - a.updatedAt;
       }
     });
+
+  // Keyboard navigation handler
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      // Only handle keys when in list view
+      if (view.type !== 'list') {
+        // Escape goes back from any view
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          if (view.type === 'detail') {
+            setView({ type: 'list' });
+          } else if (view.type === 'edit' || view.type === 'edit-waypoint') {
+            setView({ type: 'detail', work: view.work });
+          } else if (view.type === 'add') {
+            setView({ type: 'list' });
+          }
+        }
+        return;
+      }
+
+      const isInputFocused =
+        document.activeElement?.tagName === 'INPUT' ||
+        document.activeElement?.tagName === 'TEXTAREA' ||
+        document.activeElement?.tagName === 'SELECT';
+
+      switch (e.key) {
+        case 'ArrowDown':
+          e.preventDefault();
+          setSelectedIndex((prev) =>
+            prev < filteredWorks.length - 1 ? prev + 1 : prev
+          );
+          break;
+        case 'ArrowUp':
+          e.preventDefault();
+          setSelectedIndex((prev) => (prev > 0 ? prev - 1 : prev));
+          break;
+        case 'Enter':
+          if (selectedIndex >= 0 && selectedIndex < filteredWorks.length && !isInputFocused) {
+            e.preventDefault();
+            setView({ type: 'detail', work: filteredWorks[selectedIndex] });
+          }
+          break;
+        case 'Escape':
+          e.preventDefault();
+          if (isInputFocused) {
+            (document.activeElement as HTMLElement).blur();
+            setSelectedIndex(0);
+          } else {
+            setSelectedIndex(-1);
+          }
+          break;
+        case '/':
+          if (!isInputFocused) {
+            e.preventDefault();
+            searchInputRef.current?.focus();
+          }
+          break;
+        case 'n':
+          if (!isInputFocused) {
+            e.preventDefault();
+            setView({ type: 'add' });
+          }
+          break;
+      }
+    },
+    [view, filteredWorks, selectedIndex]
+  );
+
+  useEffect(() => {
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [handleKeyDown]);
 
   async function loadWorks() {
     setLoading(true);
@@ -107,12 +189,52 @@ export function App() {
 
   async function handleSetWaypoint(
     workId: string,
-    data: Partial<Pick<Waypoint, 'chapter' | 'episode' | 'page' | 'note'>>
+    data: Partial<Pick<Waypoint, 'chapter' | 'episode' | 'page' | 'timestamp' | 'percentage' | 'note' | 'sourceUrl'>>
   ) {
     await createWaypoint({
       workId,
       ...data,
     });
+    await loadWorks();
+    // Refresh detail view with updated work
+    const updatedWork = works.find((w) => w.id === workId);
+    if (updatedWork) {
+      const waypoint = await getLatestWaypoint(workId);
+      setView({
+        type: 'detail',
+        work: {
+          ...updatedWork,
+          progress: waypoint ? formatProgress(waypoint) : undefined,
+          latestWaypoint: waypoint ?? undefined,
+        },
+      });
+    }
+  }
+
+  async function handleUpdateWaypoint(
+    waypointId: string,
+    workId: string,
+    data: Partial<Pick<Waypoint, 'chapter' | 'episode' | 'page' | 'note' | 'sourceUrl'>>
+  ) {
+    await updateWaypoint(waypointId, data);
+    await loadWorks();
+    // Refresh detail view with updated work
+    const updatedWork = works.find((w) => w.id === workId);
+    if (updatedWork) {
+      const waypoint = await getLatestWaypoint(workId);
+      setView({
+        type: 'detail',
+        work: {
+          ...updatedWork,
+          progress: waypoint ? formatProgress(waypoint) : undefined,
+          latestWaypoint: waypoint ?? undefined,
+        },
+      });
+    }
+  }
+
+  async function handleDeleteWaypoint(waypointId: string, workId: string) {
+    await deleteWaypoint(waypointId);
     await loadWorks();
     // Refresh detail view with updated work
     const updatedWork = works.find((w) => w.id === workId);
@@ -147,10 +269,11 @@ export function App() {
           {!loading && works.length > 0 && (
             <div class="px-4 pt-3 pb-2 border-b border-border space-y-2">
               <input
+                ref={searchInputRef}
                 type="text"
                 value={search}
                 onInput={(e) => setSearch((e.target as HTMLInputElement).value)}
-                placeholder="Search works..."
+                placeholder="Search works... (/ to focus)"
                 class="w-full px-3 py-1.5 text-sm border border-border rounded-md bg-surface focus:outline-none focus:border-accent"
               />
               <div class="flex gap-2">
@@ -224,6 +347,7 @@ export function App() {
             ) : (
               <WorkList
                 works={filteredWorks}
+                selectedIndex={selectedIndex}
                 onSelect={(work) => setView({ type: 'detail', work })}
                 onStatusChange={handleQuickStatusChange}
               />
@@ -246,6 +370,9 @@ export function App() {
           onEdit={() => setView({ type: 'edit', work: view.work })}
           onDelete={() => handleDeleteWork(view.work.id)}
           onSetWaypoint={(data) => handleSetWaypoint(view.work.id, data)}
+          onEditWaypoint={(waypoint) =>
+            setView({ type: 'edit-waypoint', work: view.work, waypoint })
+          }
         />
       )}
 
@@ -253,6 +380,18 @@ export function App() {
         <EditWorkForm
           work={view.work}
           onSubmit={(data) => handleUpdateWork(view.work.id, data)}
+          onCancel={() => setView({ type: 'detail', work: view.work })}
+        />
+      )}
+
+      {view.type === 'edit-waypoint' && (
+        <EditWaypointForm
+          waypoint={view.waypoint}
+          work={view.work}
+          onSubmit={(data) =>
+            handleUpdateWaypoint(view.waypoint.id, view.work.id, data)
+          }
+          onDelete={() => handleDeleteWaypoint(view.waypoint.id, view.work.id)}
           onCancel={() => setView({ type: 'detail', work: view.work })}
         />
       )}
@@ -308,19 +447,22 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
 
 function WorkList({
   works,
+  selectedIndex,
   onSelect,
   onStatusChange,
 }: {
   works: WorkWithProgress[];
+  selectedIndex: number;
   onSelect: (work: WorkWithProgress) => void;
   onStatusChange: (id: string, status: WorkStatus) => void;
 }) {
   return (
     <ul class="space-y-2">
-      {works.map((work) => (
+      {works.map((work, index) => (
         <WorkItem
           key={work.id}
           work={work}
+          isSelected={index === selectedIndex}
           onSelect={() => onSelect(work)}
           onStatusChange={(status) => onStatusChange(work.id, status)}
         />
@@ -331,10 +473,12 @@ function WorkList({
 
 function WorkItem({
   work,
+  isSelected,
   onSelect,
   onStatusChange,
 }: {
   work: WorkWithProgress;
+  isSelected: boolean;
   onSelect: () => void;
   onStatusChange: (status: WorkStatus) => void;
 }) {
@@ -354,7 +498,9 @@ function WorkItem({
     <li class="relative">
       <button
         onClick={onSelect}
-        class="w-full text-left p-3 bg-surface-secondary rounded-md hover:bg-surface-tertiary transition-colors"
+        class={`w-full text-left p-3 bg-surface-secondary rounded-md hover:bg-surface-tertiary transition-colors ${
+          isSelected ? 'ring-2 ring-accent ring-offset-1 ring-offset-surface' : ''
+        }`}
       >
         <div class="flex items-start justify-between gap-2">
           <div class="min-w-0 flex-1">
@@ -583,25 +729,31 @@ function WorkDetail({
   onEdit,
   onDelete,
   onSetWaypoint,
+  onEditWaypoint,
 }: {
   work: WorkWithProgress;
   onBack: () => void;
   onEdit: () => void;
   onDelete: () => void;
   onSetWaypoint: (
-    data: Partial<Pick<Waypoint, 'chapter' | 'episode' | 'page' | 'note' | 'sourceUrl'>>
+    data: Partial<Pick<Waypoint, 'chapter' | 'episode' | 'page' | 'timestamp' | 'percentage' | 'note' | 'sourceUrl'>>
   ) => void;
+  onEditWaypoint: (waypoint: Waypoint) => void;
 }) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [waypointValue, setWaypointValue] = useState('');
+  const [secondaryValue, setSecondaryValue] = useState('');
   const [note, setNote] = useState('');
   const [sourceUrl, setSourceUrl] = useState('');
   const [showHistory, setShowHistory] = useState(false);
   const [history, setHistory] = useState<Waypoint[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
-  const progressField = work.type === 'anime' ? 'episode' : 'chapter';
-  const progressLabel = work.type === 'anime' ? 'Episode' : 'Chapter';
+  const isAnime = work.type === 'anime';
+  const progressField = isAnime ? 'episode' : 'chapter';
+  const progressLabel = isAnime ? 'Episode' : 'Chapter';
+  const secondaryField = isAnime ? 'timestamp' : 'page';
+  const secondaryLabel = isAnime ? 'Timestamp (seconds)' : 'Page';
   const hasSourceUrl = work.latestWaypoint?.sourceUrl;
 
   async function loadHistory() {
@@ -621,12 +773,17 @@ function WorkDetail({
     const value = parseInt(waypointValue, 10);
     if (isNaN(value) || value < 0) return;
 
+    const secondaryParsed = parseInt(secondaryValue, 10);
+    const hasSecondary = !isNaN(secondaryParsed) && secondaryParsed >= 0;
+
     onSetWaypoint({
       [progressField]: value,
+      ...(hasSecondary ? { [secondaryField]: secondaryParsed } : {}),
       note: note.trim() || undefined,
       sourceUrl: sourceUrl.trim() || undefined,
     });
     setWaypointValue('');
+    setSecondaryValue('');
     setNote('');
     setSourceUrl('');
   }
@@ -700,20 +857,37 @@ function WorkDetail({
 
         {/* Set Waypoint Form */}
         <form onSubmit={handleSetWaypoint} class="space-y-3">
-          <div>
-            <label class="block text-sm font-medium mb-1">
-              Update {progressLabel}
-            </label>
-            <input
-              type="number"
-              min="0"
-              value={waypointValue}
-              onInput={(e) =>
-                setWaypointValue((e.target as HTMLInputElement).value)
-              }
-              placeholder={`Enter ${progressLabel.toLowerCase()} number...`}
-              class="w-full px-3 py-2 text-sm border border-border rounded-md bg-surface focus:outline-none focus:border-accent"
-            />
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block text-sm font-medium mb-1">
+                {progressLabel}
+              </label>
+              <input
+                type="number"
+                min="0"
+                value={waypointValue}
+                onInput={(e) =>
+                  setWaypointValue((e.target as HTMLInputElement).value)
+                }
+                placeholder={`${progressLabel}...`}
+                class="w-full px-3 py-2 text-sm border border-border rounded-md bg-surface focus:outline-none focus:border-accent"
+              />
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-1">
+                {secondaryLabel} <span class="text-text-tertiary font-normal text-xs">(opt)</span>
+              </label>
+              <input
+                type="number"
+                min="0"
+                value={secondaryValue}
+                onInput={(e) =>
+                  setSecondaryValue((e.target as HTMLInputElement).value)
+                }
+                placeholder={isAnime ? 'Seconds...' : 'Page...'}
+                class="w-full px-3 py-2 text-sm border border-border rounded-md bg-surface focus:outline-none focus:border-accent"
+              />
+            </div>
           </div>
           <div>
             <div class="flex items-center justify-between mb-1">
@@ -780,9 +954,17 @@ function WorkDetail({
                 >
                   <div class="flex items-center justify-between">
                     <span class="font-medium">{formatProgress(wp)}</span>
-                    <span class="text-text-tertiary">
-                      {formatRelativeTime(wp.createdAt)}
-                    </span>
+                    <div class="flex items-center gap-2">
+                      <button
+                        onClick={() => onEditWaypoint(wp)}
+                        class="text-text-tertiary hover:text-accent"
+                      >
+                        Edit
+                      </button>
+                      <span class="text-text-tertiary">
+                        {formatRelativeTime(wp.createdAt)}
+                      </span>
+                    </div>
                   </div>
                   {wp.note && (
                     <p class="text-text-tertiary mt-1">{wp.note}</p>
@@ -828,6 +1010,187 @@ function WorkDetail({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function EditWaypointForm({
+  waypoint,
+  work,
+  onSubmit,
+  onDelete,
+  onCancel,
+}: {
+  waypoint: Waypoint;
+  work: Work;
+  onSubmit: (
+    data: Partial<Pick<Waypoint, 'chapter' | 'episode' | 'page' | 'timestamp' | 'percentage' | 'note' | 'sourceUrl'>>
+  ) => void;
+  onDelete: () => void;
+  onCancel: () => void;
+}) {
+  const isAnime = work.type === 'anime';
+  const progressField = isAnime ? 'episode' : 'chapter';
+  const progressLabel = isAnime ? 'Episode' : 'Chapter';
+  const secondaryField = isAnime ? 'timestamp' : 'page';
+  const secondaryLabel = isAnime ? 'Timestamp (seconds)' : 'Page';
+  const initialValue = waypoint[progressField]?.toString() ?? '';
+  const initialSecondary = waypoint[secondaryField]?.toString() ?? '';
+
+  const [value, setValue] = useState(initialValue);
+  const [secondaryValue, setSecondaryValue] = useState(initialSecondary);
+  const [note, setNote] = useState(waypoint.note ?? '');
+  const [sourceUrl, setSourceUrl] = useState(waypoint.sourceUrl ?? '');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  function handleSubmit(e: Event) {
+    e.preventDefault();
+    const numValue = parseInt(value, 10);
+    if (isNaN(numValue) || numValue < 0) return;
+
+    const secondaryParsed = parseInt(secondaryValue, 10);
+    const hasSecondary = !isNaN(secondaryParsed) && secondaryParsed >= 0;
+
+    onSubmit({
+      [progressField]: numValue,
+      // Clear secondary if empty, otherwise set it
+      [secondaryField]: hasSecondary ? secondaryParsed : undefined,
+      note: note.trim() || undefined,
+      sourceUrl: sourceUrl.trim() || undefined,
+    });
+  }
+
+  return (
+    <div class="flex flex-col h-full">
+      <header class="flex items-center justify-between px-4 py-3 border-b border-border">
+        <button
+          type="button"
+          onClick={onCancel}
+          class="text-text-secondary hover:text-text text-sm"
+        >
+          Cancel
+        </button>
+        <h2 class="text-base font-medium">Edit Waypoint</h2>
+        <button
+          type="button"
+          onClick={handleSubmit}
+          disabled={!value}
+          class="text-accent hover:text-accent-hover text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Save
+        </button>
+      </header>
+
+      <form onSubmit={handleSubmit} class="flex-1 overflow-y-auto p-4 space-y-4">
+        <div>
+          <p class="text-xs text-text-tertiary mb-3">
+            Editing waypoint for "{work.title}"
+          </p>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-sm font-medium mb-1">{progressLabel}</label>
+            <input
+              type="number"
+              min="0"
+              value={value}
+              onInput={(e) => setValue((e.target as HTMLInputElement).value)}
+              class="w-full px-3 py-2 text-sm border border-border rounded-md bg-surface focus:outline-none focus:border-accent"
+              autoFocus
+            />
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-1">
+              {secondaryLabel} <span class="text-text-tertiary font-normal text-xs">(opt)</span>
+            </label>
+            <input
+              type="number"
+              min="0"
+              value={secondaryValue}
+              onInput={(e) => setSecondaryValue((e.target as HTMLInputElement).value)}
+              placeholder={isAnime ? 'Seconds...' : 'Page...'}
+              class="w-full px-3 py-2 text-sm border border-border rounded-md bg-surface focus:outline-none focus:border-accent"
+            />
+          </div>
+        </div>
+
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <label class="text-sm font-medium">
+              Source URL <span class="text-text-tertiary font-normal">(optional)</span>
+            </label>
+            <button
+              type="button"
+              onClick={async () => {
+                const [tab] = await chrome.tabs.query({
+                  active: true,
+                  currentWindow: true,
+                });
+                if (tab?.url) setSourceUrl(tab.url);
+              }}
+              class="text-xs text-accent hover:text-accent-hover"
+            >
+              Use Current Tab
+            </button>
+          </div>
+          <input
+            type="url"
+            value={sourceUrl}
+            onInput={(e) => setSourceUrl((e.target as HTMLInputElement).value)}
+            placeholder="https://..."
+            class="w-full px-3 py-2 text-sm border border-border rounded-md bg-surface focus:outline-none focus:border-accent"
+          />
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium mb-1">
+            Note <span class="text-text-tertiary font-normal">(optional)</span>
+          </label>
+          <input
+            type="text"
+            value={note}
+            onInput={(e) => setNote((e.target as HTMLInputElement).value)}
+            placeholder="Add a note..."
+            class="w-full px-3 py-2 text-sm border border-border rounded-md bg-surface focus:outline-none focus:border-accent"
+          />
+        </div>
+
+        {/* Delete Section */}
+        <div class="pt-4 border-t border-border">
+          {showDeleteConfirm ? (
+            <div class="space-y-2">
+              <p class="text-sm text-text-secondary">
+                Delete this waypoint? This cannot be undone.
+              </p>
+              <div class="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteConfirm(false)}
+                  class="flex-1 px-3 py-2 text-sm border border-border rounded-md hover:bg-surface-secondary"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={onDelete}
+                  class="flex-1 px-3 py-2 text-sm bg-red-600 text-white rounded-md hover:bg-red-700"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowDeleteConfirm(true)}
+              class="text-sm text-red-600 hover:text-red-700"
+            >
+              Delete this waypoint
+            </button>
+          )}
+        </div>
+      </form>
     </div>
   );
 }
