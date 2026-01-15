@@ -33,22 +33,26 @@
 - [x] Filter by status (reading, watching, paused, completed, dropped)
 - [x] Filter by type (novel, manga, webcomic, anime)
 - [x] Sort options (recently updated, title, date added)
-- [x] Keyboard navigation
+- [x] Keyboard navigation (↑↓ select, Enter open, Esc back, / search, n add)
 - [x] Work count indicator
+- [x] Quick Add bar (one-click add from current tab)
+- [x] Quick Update bar (one-click update for matched works)
+- [x] Toast notifications for actions
 
 ### Options Page
 - [x] Clear all data (with confirmation)
 - [x] Storage usage display
 - [x] Theme settings (light/dark/system)
 - [x] Import from CSV
-- [ ] Import from AniList
-- [ ] Import from MyAnimeList
+- [x] Import from AniList (public lists)
+- [x] Import from MyAnimeList (XML export)
+- [x] Export to JSON
 
 ### Design Polish
 - [x] Create proper PNG icons (16, 48, 128)
 - [ ] Empty state illustrations
 - [ ] Loading skeletons
-- [ ] Toast notifications for actions
+- [x] Toast notifications for actions
 - [x] Confirm dialogs for destructive actions
 - [ ] Responsive popup width
 
@@ -56,14 +60,16 @@
 
 ## Extension Features
 
-### Content Script
-- [ ] Detect current page (optional, user-triggered)
-- [ ] Auto-suggest work title from page
-- [ ] Auto-detect chapter/episode from URL patterns
+### Smart Detection (NEW - Implemented)
+- [x] Auto-detect media type (anime/manga/webcomic/novel) from page
+- [x] Page content keyword scanning (200+ sites recognized)
+- [x] Auto-extract chapter/episode from URL patterns
+- [x] Auto-extract clean title from page title
+- [x] Keyword scoring system for accurate categorization
 
 ### Browser Integration
-- [ ] Context menu: "Add to Waypoint"
-- [ ] Context menu: "Update waypoint for [Work]"
+- [x] Context menu: "Add to Waypoint" (with type submenu)
+- [x] Context menu: "Update waypoint for [Work]" (shows recent 10)
 - [ ] Keyboard shortcut to open popup
 - [ ] Keyboard shortcut to quick-save waypoint
 - [ ] Badge showing active work progress
@@ -82,16 +88,38 @@
 - [ ] Storage quota warnings
 - [ ] Automatic cleanup of orphaned data
 - [ ] Data validation on import
+- [ ] Deduplication on import
 
 ---
 
 ## Accessibility
 
 - [x] Keyboard navigation throughout
-- [ ] Focus management in modals
-- [ ] Screen reader labels
-- [ ] Sufficient color contrast
+- [x] Focus management in modals (useFocusTrap)
+- [ ] Screen reader labels (ARIA)
+- [ ] Sufficient color contrast audit
 - [ ] Reduced motion option
+- [ ] Semantic HTML (<nav>, <main>, etc.)
+
+---
+
+## Code Quality & Tech Debt
+
+### High Priority
+- [ ] Extract shared detection logic to `src/lib/detection.ts`
+- [ ] Add input validation for imports
+- [ ] Handle AniList API errors gracefully (rate limits, private lists)
+- [ ] Split popup/App.tsx into smaller components (currently 1700+ lines)
+
+### Medium Priority
+- [ ] Add error logging infrastructure
+- [ ] Cache storage operations for performance
+- [ ] Reduce popup bundle size (currently 34KB)
+- [ ] Remove duplicate code between popup and background
+
+### Low Priority
+- [ ] Performance optimization for large collections (1000+ works)
+- [ ] Optimize context menu rebuilds
 
 ---
 
@@ -99,6 +127,7 @@
 
 - [ ] Unit tests for storage layer
 - [ ] Unit tests for utility functions
+- [ ] Unit tests for detection/extraction functions
 - [ ] Component tests for popup
 - [ ] Component tests for options
 - [ ] E2E tests for core flows
@@ -111,6 +140,7 @@
 - [ ] Keyboard shortcuts reference
 - [ ] Data format documentation (for manual editing)
 - [ ] Contributing guidelines
+- [ ] Site compatibility list
 
 ---
 
@@ -122,38 +152,54 @@
 - [ ] Tags/collections for organizing works
 - [ ] Reading/watching goals
 - [ ] Browser history integration (optional)
+- [ ] Reminder/notification system
+- [ ] Cross-device sync
 
 ---
 
-## Bugs / Tech Debt
+## Known Issues
 
-- [ ] (none yet)
+- [ ] AniList import only works for public lists (no auth)
+- [ ] Progress extraction may match wrong numbers on complex URLs
+- [ ] Context menu limited to 10 recent works
+- [ ] No cloud backup option
 
 ---
 
 ## Progress Summary
 
-### Completed
+### Completed (v0.1.0)
 - Core works management (CRUD)
 - Waypoint tracking with history
 - Waypoint editing and deletion
-- All progress types (chapter, episode, page, timestamp)
+- All progress types (chapter, episode, page, timestamp, percentage)
 - Resume functionality
 - Search, filter, and sort
 - Quick status toggle
 - Source URL support with "Use Current Tab"
 - Options page with storage stats and clear data
-- Export/import functionality (JSON and CSV)
+- Export/import functionality (JSON, CSV, AniList, MAL)
 - Dark mode theme toggle (light/dark/system)
 - Proper PNG icons (16, 48, 128)
-- Keyboard navigation (↑↓ to select, Enter to open, Esc to go back, / to search, n to add)
+- Keyboard navigation
+- Context menus (Add to Waypoint, Update waypoint)
+- Quick Add/Update bar in popup
+- Toast notifications
+- Focus management (focus trap in forms)
+- Smart media type detection (page scanning, 200+ sites)
+- Auto-extract chapter/episode from URLs
+- Auto-extract title from page
 
 ### Next Priority
-1. Context menus ("Add to Waypoint", "Update waypoint")
-2. AniList/MyAnimeList import
-3. Focus management in modals
-4. Toast notifications
+1. Extract shared detection code to reduce duplication
+2. Add ARIA labels for accessibility
+3. Split large App.tsx into components
+4. Add basic unit tests for core functions
+5. Add keyboard shortcuts for popup/quick-save
 
-
-notes from author
-- add a button so when you finish reading for the session you can open waypoint and if it detects the work is already in the system there is a update waypoint button for quick update 
+### Nice to Have
+- Empty state illustrations
+- Loading skeletons
+- Cloud backup (Google Drive)
+- Statistics dashboard
+- Bulk operations
