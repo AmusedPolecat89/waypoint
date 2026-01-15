@@ -41,14 +41,14 @@
 - [x] Storage usage display
 - [x] Theme settings (light/dark/system)
 - [x] Import from CSV
-- [x] Import from AniList
-- [x] Import from MyAnimeList
+- [ ] Import from AniList
+- [ ] Import from MyAnimeList
 
 ### Design Polish
 - [x] Create proper PNG icons (16, 48, 128)
 - [ ] Empty state illustrations
 - [ ] Loading skeletons
-- [x] Toast notifications for actions
+- [ ] Toast notifications for actions
 - [x] Confirm dialogs for destructive actions
 - [ ] Responsive popup width
 
@@ -62,8 +62,8 @@
 - [ ] Auto-detect chapter/episode from URL patterns
 
 ### Browser Integration
-- [x] Context menu: "Add to Waypoint"
-- [x] Context menu: "Update waypoint for [Work]"
+- [ ] Context menu: "Add to Waypoint"
+- [ ] Context menu: "Update waypoint for [Work]"
 - [ ] Keyboard shortcut to open popup
 - [ ] Keyboard shortcut to quick-save waypoint
 - [ ] Badge showing active work progress
@@ -88,7 +88,7 @@
 ## Accessibility
 
 - [x] Keyboard navigation throughout
-- [x] Focus management in modals
+- [ ] Focus management in modals
 - [ ] Screen reader labels
 - [ ] Sufficient color contrast
 - [ ] Reduced motion option
@@ -147,14 +147,13 @@
 - Dark mode theme toggle (light/dark/system)
 - Proper PNG icons (16, 48, 128)
 - Keyboard navigation (↑↓ to select, Enter to open, Esc to go back, / to search, n to add)
-- Context menus ("Add to Waypoint", "Update waypoint for [Work]")
-- AniList import (by username)
-- MyAnimeList import (XML export)
-- Focus management in modals (focus trap)
-- Toast notifications for actions
 
 ### Next Priority
-1. Empty state illustrations
-2. Loading skeletons
-3. Responsive popup width
-4. Screen reader labels
+1. Context menus ("Add to Waypoint", "Update waypoint")
+2. AniList/MyAnimeList import
+3. Focus management in modals
+4. Toast notifications
+
+
+notes from author
+- add a button so when you finish reading for the session you can open waypoint and if it detects the work is already in the system there is a update waypoint button for quick update 
