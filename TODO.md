@@ -106,16 +106,16 @@
 ## Code Quality & Tech Debt
 
 ### High Priority
-- [ ] Extract shared detection logic to `src/lib/detection.ts`
+- [x] Extract shared detection logic to `src/lib/detection.ts`
 - [ ] Add input validation for imports
 - [ ] Handle AniList API errors gracefully (rate limits, private lists)
-- [ ] Split popup/App.tsx into smaller components (currently 1700+ lines)
+- [x] Split popup/App.tsx into smaller components (now modular: hooks/, components/, types, constants)
 
 ### Medium Priority
 - [ ] Add error logging infrastructure
 - [ ] Cache storage operations for performance
-- [ ] Reduce popup bundle size (currently 34KB)
-- [ ] Remove duplicate code between popup and background
+- [ ] Reduce popup bundle size (currently 26KB gzipped 6.5KB)
+- [x] Remove duplicate code between popup and background (shared detection module)
 
 ### Low Priority
 - [ ] Performance optimization for large collections (1000+ works)
@@ -189,13 +189,15 @@
 - Smart media type detection (page scanning, 200+ sites)
 - Auto-extract chapter/episode from URLs
 - Auto-extract title from page
+- Modular popup architecture (hooks, components, types, constants)
+- Shared detection module (src/lib/detection.ts)
 
 ### Next Priority
-1. Extract shared detection code to reduce duplication
-2. Add ARIA labels for accessibility
-3. Split large App.tsx into components
-4. Add basic unit tests for core functions
-5. Add keyboard shortcuts for popup/quick-save
+1. Add ARIA labels for accessibility
+2. Add basic unit tests for core functions
+3. Add keyboard shortcuts for popup/quick-save
+4. Add input validation for imports
+5. Handle AniList API errors gracefully
 
 ### Nice to Have
 - Empty state illustrations

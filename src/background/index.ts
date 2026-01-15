@@ -9,6 +9,7 @@
 
 import { createWork, createWaypoint, getWorks, getLatestWaypoint } from '../lib/storage';
 import type { MediaType, WorkStatus } from '../lib/types';
+import { cleanTitle, extractProgressSimple } from '../lib/detection';
 
 // Context menu IDs
 const MENU_ADD_TO_WAYPOINT = 'add-to-waypoint';
@@ -115,70 +116,11 @@ async function refreshUpdateMenu() {
 /**
  * Get page info from tab
  */
-async function getPageInfo(tab: chrome.tabs.Tab): Promise<{ title: string; url: string }> {
-  // Clean up the page title (remove common suffixes)
-  let title = tab.title || 'Untitled';
-
-  // Remove common site suffixes
-  const suffixPatterns = [
-    / [-–—|] .+$/,  // "Title - Site Name" or "Title | Site Name"
-    / :: .+$/,      // "Title :: Site Name"
-    /\s*\(.+\)$/,   // "Title (Site Name)"
-  ];
-
-  for (const pattern of suffixPatterns) {
-    title = title.replace(pattern, '');
-  }
-
+function getPageInfo(tab: chrome.tabs.Tab): { title: string; url: string } {
   return {
-    title: title.trim(),
+    title: cleanTitle(tab.title || 'Untitled'),
     url: tab.url || '',
   };
-}
-
-/**
- * Try to extract chapter/episode number from URL or title
- */
-function extractProgress(url: string, title: string): { chapter?: number; episode?: number } {
-  const patterns = [
-    // Common URL patterns
-    /chapter[_-]?(\d+)/i,
-    /ch[_-]?(\d+)/i,
-    /episode[_-]?(\d+)/i,
-    /ep[_-]?(\d+)/i,
-    /\/(\d+)\/?$/,  // Ends with number
-    // Title patterns
-    /chapter\s*(\d+)/i,
-    /ch\.?\s*(\d+)/i,
-    /episode\s*(\d+)/i,
-    /ep\.?\s*(\d+)/i,
-  ];
-
-  for (const pattern of patterns) {
-    const urlMatch = url.match(pattern);
-    if (urlMatch) {
-      const num = parseInt(urlMatch[1], 10);
-      if (!isNaN(num) && num > 0 && num < 10000) {
-        if (pattern.source.toLowerCase().includes('ep')) {
-          return { episode: num };
-        }
-        return { chapter: num };
-      }
-    }
-
-    const titleMatch = title.match(pattern);
-    if (titleMatch) {
-      const num = parseInt(titleMatch[1], 10);
-      if (!isNaN(num) && num > 0 && num < 10000) {
-        if (pattern.source.toLowerCase().includes('ep')) {
-          return { episode: num };
-        }
-        return { chapter: num };
-      }
-    }
-  }
-
-  return {};
 }
 
 /**
@@ -208,7 +150,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     const mediaType = typeMap[menuItemId];
     const status = statusMap[menuItemId];
     const pageInfo = await getPageInfo(tab);
-    const progress = extractProgress(targetUrl, pageInfo.title);
+    const progress = extractProgressSimple(targetUrl, pageInfo.title);
 
     // Create the work
     const work = await createWork({
@@ -241,7 +183,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     if (workId === 'empty') return;
 
     const pageInfo = await getPageInfo(tab);
-    const progress = extractProgress(targetUrl, pageInfo.title);
+    const progress = extractProgressSimple(targetUrl, pageInfo.title);
 
     // Get the latest waypoint to preserve any existing progress type
     const latestWaypoint = await getLatestWaypoint(workId);
