@@ -1,0 +1,24 @@
+{
+  "name": "waypoint",
+  "version": "0.1.0",
+  "description": "Remember where you left off.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "preact": "^10.19.0"
+  },
+  "devDependencies": {
+    "@crxjs/vite-plugin": "^2.0.0-beta.23",
+    "@preact/preset-vite": "^2.8.0",
+    "@types/chrome": "^0.0.260",
+    "autoprefixer": "^10.4.17",
+    "postcss": "^8.4.35",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5.3.0",
+    "vite": "^5.1.0"
+  }
+}
