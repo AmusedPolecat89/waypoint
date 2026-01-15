@@ -1,21 +1,21 @@
 import sharp from 'sharp';
-import { readFileSync, writeFileSync } from 'fs';
+import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const publicDir = join(__dirname, '..', 'public', 'icons');
+const iconsDir = join(__dirname, '..', 'icons');
 
 const sizes = [16, 48, 128];
 
 async function generateIcons() {
+  const svgPath = join(iconsDir, 'icon.svg');
+  const svgBuffer = readFileSync(svgPath);
+
   for (const size of sizes) {
-    const svgPath = join(publicDir, `icon-${size}.svg`);
-    const pngPath = join(publicDir, `icon-${size}.png`);
+    const pngPath = join(iconsDir, `icon-${size}.png`);
 
-    const svgBuffer = readFileSync(svgPath);
-
-    await sharp(svgBuffer)
+    await sharp(svgBuffer, { density: 300 })
       .resize(size, size)
       .png()
       .toFile(pngPath);

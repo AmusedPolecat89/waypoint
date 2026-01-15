@@ -450,7 +450,60 @@ const TITLE_PREFIX_PATTERNS = [
   /^Stream\s+/i,
   /^Chapter\s*\d+\s*[-–:]\s*/i,
   /^Episode\s*\d+\s*[-–:]\s*/i,
+  /^Ch\.?\s*\d+\s*[-–:]\s*/i,
+  /^Ep\.?\s*\d+\s*[-–:]\s*/i,
+  /^#\d+\s*[-–:]\s*/i,
 ];
+
+/** Generic/useless titles that should trigger URL fallback */
+const GENERIC_TITLES = [
+  'home', 'index', 'page', 'read', 'watch', 'chapter', 'episode',
+  'viewer', 'reader', 'loading', 'untitled', 'unknown',
+];
+
+/** Site-specific URL patterns for title extraction */
+const SITE_TITLE_PATTERNS: Array<{ domain: RegExp; pattern: RegExp; group: number }> = [
+  // Webtoons: /en/genre/title-slug/chapter/viewer
+  { domain: /webtoons?\.com/i, pattern: /\/[a-z]{2}\/[^/]+\/([^/]+)\//, group: 1 },
+  // Tapas: /series/title-slug/...
+  { domain: /tapas\.io/i, pattern: /\/series\/([^/]+)/, group: 1 },
+  // MangaDex: /title/uuid/title-slug
+  { domain: /mangadex\.org/i, pattern: /\/title\/[^/]+\/([^/]+)/, group: 1 },
+  // Asura/Flame scans: /series/title-slug or /manga/title-slug
+  { domain: /asura|flame|reaper|luminous/i, pattern: /\/(?:series|manga|comic)\/([^/]+)/, group: 1 },
+  // Generic: /manga/title-slug or /comic/title-slug or /series/title-slug
+  { domain: /./, pattern: /\/(?:manga|comic|series|title|read)\/([^/]+)/, group: 1 },
+];
+
+/**
+ * Check if a title is generic/useless and should be replaced
+ */
+function isGenericTitle(title: string): boolean {
+  const normalized = title.toLowerCase().trim();
+  // Check against generic titles list
+  if (GENERIC_TITLES.some(generic => normalized === generic || normalized.startsWith(generic + ' '))) {
+    return true;
+  }
+  // Also check if it's just a number (like "4" or "Chapter 4")
+  if (/^(?:chapter|ch\.?|episode|ep\.?)?\s*\d+$/i.test(normalized)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Convert URL slug to readable title
+ */
+function slugToTitle(slug: string): string {
+  return slug
+    .replace(/[-_]+/g, ' ')
+    .replace(/\.(html?|php|aspx?)$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ');
+}
 
 /**
  * Clean up and extract the work title from page title
@@ -472,9 +525,9 @@ export function extractTitle(pageTitle: string, url: string): string {
   title = title.replace(/\s+/g, ' ').trim();
 
   // If title is too short or generic, try to extract from URL
-  if (title.length < 3 || /^(home|index|page|read|watch|chapter|episode)$/i.test(title)) {
+  if (title.length < 3 || isGenericTitle(title)) {
     const urlTitle = extractTitleFromUrl(url);
-    if (urlTitle && urlTitle.length > title.length) {
+    if (urlTitle && urlTitle.length >= 3 && !isGenericTitle(urlTitle)) {
       title = urlTitle;
     }
   }
@@ -487,27 +540,43 @@ export function extractTitle(pageTitle: string, url: string): string {
  */
 export function extractTitleFromUrl(url: string): string {
   try {
-    const pathname = new URL(url).pathname;
-    const parts = pathname.split('/').filter(Boolean);
+    const urlObj = new URL(url);
+    const hostname = urlObj.hostname.toLowerCase();
+    const pathname = urlObj.pathname;
 
-    // Skip common non-title segments
+    // First, try site-specific patterns
+    for (const { domain, pattern, group } of SITE_TITLE_PATTERNS) {
+      if (domain.test(hostname)) {
+        const match = pathname.match(pattern);
+        if (match && match[group]) {
+          const slug = match[group];
+          // Skip if slug is just a number or very short
+          if (!/^\d+$/.test(slug) && slug.length >= 3) {
+            return slugToTitle(slug);
+          }
+        }
+      }
+    }
+
+    // Fallback: look for any slug-like segment
+    const parts = pathname.split('/').filter(Boolean);
     const skipSegments = [
       'manga', 'comic', 'anime', 'novel', 'read', 'watch',
-      'chapter', 'episode', 'series', 'title',
+      'chapter', 'episode', 'series', 'title', 'viewer', 'list',
+      'en', 'es', 'fr', 'de', 'pt', 'jp', 'kr', 'cn', // language codes
     ];
 
     for (const part of parts) {
-      // Skip if it's a number or common segment
+      // Skip if it's a number, language code, or common segment
       if (/^\d+$/.test(part) || skipSegments.includes(part.toLowerCase())) {
         continue;
       }
+      // Skip UUID-like strings
+      if (/^[a-f0-9-]{32,}$/i.test(part)) {
+        continue;
+      }
 
-      // Convert URL slug to readable title
-      const cleaned = part
-        .replace(/[-_]/g, ' ')
-        .replace(/\.(html?|php|aspx?)$/i, '')
-        .replace(/\b\w/g, (c) => c.toUpperCase());
-
+      const cleaned = slugToTitle(part);
       if (cleaned.length >= 3) {
         return cleaned;
       }

@@ -84,48 +84,79 @@ function setupContextMenus() {
 
 // Track current update menu item IDs to remove them before refresh
 let currentUpdateMenuIds: string[] = [];
+let isRefreshing = false;
+let pendingRefresh = false;
 
 /**
  * Refresh the "Update waypoint for..." submenu with current works
  */
 async function refreshUpdateMenu() {
-  // Remove existing update menu items first
-  for (const id of currentUpdateMenuIds) {
-    try {
-      await chrome.contextMenus.remove(id);
-    } catch {
-      // Item may not exist, ignore
-    }
+  // Prevent concurrent refreshes
+  if (isRefreshing) {
+    pendingRefresh = true;
+    return;
   }
-  currentUpdateMenuIds = [];
 
-  const works = await getWorks();
+  isRefreshing = true;
 
-  // Get recent works (limit to 10 most recently updated)
-  const recentWorks = works.slice(0, 10);
+  try {
+    // Remove existing update menu items first
+    const removePromises = currentUpdateMenuIds.map(id =>
+      new Promise<void>(resolve => {
+        chrome.contextMenus.remove(id, () => {
+          // Clear any error (item may not exist)
+          chrome.runtime.lastError;
+          resolve();
+        });
+      })
+    );
+    await Promise.all(removePromises);
+    currentUpdateMenuIds = [];
 
-  if (recentWorks.length === 0) {
-    // No works yet - show disabled placeholder
-    const id = `${MENU_UPDATE_PREFIX}empty`;
-    chrome.contextMenus.create({
-      id,
-      parentId: MENU_UPDATE_WAYPOINT,
-      title: '(No works yet)',
-      enabled: false,
-      contexts: ['page', 'link'],
-    });
-    currentUpdateMenuIds.push(id);
-  } else {
-    // Create menu item for each work
-    for (const work of recentWorks) {
-      const id = `${MENU_UPDATE_PREFIX}${work.id}`;
-      chrome.contextMenus.create({
-        id,
-        parentId: MENU_UPDATE_WAYPOINT,
-        title: work.title,
-        contexts: ['page', 'link'],
-      });
-      currentUpdateMenuIds.push(id);
+    const works = await getWorks();
+
+    // Get recent works (limit to 10 most recently updated)
+    const recentWorks = works.slice(0, 10);
+
+    if (recentWorks.length === 0) {
+      // No works yet - show disabled placeholder
+      const id = `${MENU_UPDATE_PREFIX}empty`;
+      try {
+        chrome.contextMenus.create({
+          id,
+          parentId: MENU_UPDATE_WAYPOINT,
+          title: '(No works yet)',
+          enabled: false,
+          contexts: ['page', 'link'],
+        });
+        currentUpdateMenuIds.push(id);
+      } catch {
+        // Ignore duplicate errors
+      }
+    } else {
+      // Create menu item for each work
+      for (const work of recentWorks) {
+        const id = `${MENU_UPDATE_PREFIX}${work.id}`;
+        try {
+          chrome.contextMenus.create({
+            id,
+            parentId: MENU_UPDATE_WAYPOINT,
+            title: work.title,
+            contexts: ['page', 'link'],
+          });
+          currentUpdateMenuIds.push(id);
+        } catch {
+          // Ignore duplicate errors
+        }
+      }
+    }
+  } finally {
+    isRefreshing = false;
+
+    // If a refresh was requested while we were busy, do it now
+    if (pendingRefresh) {
+      pendingRefresh = false;
+      refreshUpdateMenu();
     }
   }
 }

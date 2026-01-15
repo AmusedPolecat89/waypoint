@@ -41,7 +41,7 @@ Your data lives on your device by default.
 - No hidden sync
 - No telemetry
 
-Optional backups (e.g. Google Drive) exist for **your convenience**, not as a dependency.
+Optional features like export/import exist for **your convenience**, not as a dependency.
 
 If this project disappears tomorrow, your data should still be usable.
 

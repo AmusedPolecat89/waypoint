@@ -419,7 +419,7 @@ export function App({ isSidePanel = false }: AppProps) {
 
   async function handleUpdateWork(
     id: string,
-    data: Partial<Pick<Work, 'title' | 'type' | 'status'>>
+    data: Partial<Pick<Work, 'title' | 'type' | 'status' | 'thumbnailUrl'>>
   ) {
     await updateWork(id, data);
     await loadWorks();
