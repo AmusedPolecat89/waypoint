@@ -286,11 +286,16 @@ export function detectMediaType(
 
 /** Episode number patterns (for anime) */
 const EPISODE_PATTERNS = [
+  // Query parameter formats (common on streaming sites)
+  /[?&]ep(?:isode)?[=:](\d+)/i, // ?ep=5 or &episode=10
+  /[?&]e[=:](\d+)/i, // ?e=5
+  // URL path formats
   /episode[_\-\s]*(\d+)/i,
-  /ep[_\-\s]*(\d+)/i,
+  /ep[_\-\s=]*(\d+)/i, // ep5, ep-5, ep=5
   /e(\d+)(?!\d)/i,
   /\bs(\d+)e(\d+)/i, // S01E05 format - captures episode in group 2
   /\bepisode\s*(\d+)/i,
+  // Japanese formats
   /【(\d+)】/, // Japanese episode markers
   /第(\d+)話/, // Japanese episode
   /episode[^\d]*(\d+)/i,

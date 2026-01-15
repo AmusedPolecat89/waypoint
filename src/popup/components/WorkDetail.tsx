@@ -157,9 +157,48 @@ export function WorkDetail({
               />
             </div>
             <div>
-              <label class="block text-sm font-medium mb-1">
-                {secondaryLabel} <span class="text-text-tertiary font-normal text-xs">(opt)</span>
-              </label>
+              <div class="flex items-center justify-between mb-1">
+                <label class="text-sm font-medium">
+                  {secondaryLabel} <span class="text-text-tertiary font-normal text-xs">(opt)</span>
+                </label>
+                {isAnime && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+                        if (tab?.id) {
+                          // Try all frames to find video (handles iframes)
+                          const results = await chrome.scripting.executeScript({
+                            target: { tabId: tab.id, allFrames: true },
+                            func: () => {
+                              const videos = document.querySelectorAll('video');
+                              for (const video of videos) {
+                                if (video.currentTime > 0) {
+                                  return Math.floor(video.currentTime);
+                                }
+                              }
+                              return undefined;
+                            },
+                          });
+                          // Find first frame with a timestamp
+                          for (const result of results) {
+                            if (result?.result !== undefined) {
+                              setSecondaryValue(result.result.toString());
+                              break;
+                            }
+                          }
+                        }
+                      } catch {
+                        // Ignore errors
+                      }
+                    }}
+                    class="text-xs text-accent hover:text-accent-hover"
+                  >
+                    Use Video Time
+                  </button>
+                )}
+              </div>
               <input
                 type="number"
                 min="0"

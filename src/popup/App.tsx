@@ -257,6 +257,57 @@ export function App() {
     }
   }
 
+  /**
+   * Extract current video timestamp from the page
+   * Returns the current time in seconds, or undefined if no video found
+   */
+  async function extractVideoTimestamp(tabId: number): Promise<number | undefined> {
+    try {
+      // Try main frame first
+      const mainResults = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => {
+          const videos = document.querySelectorAll('video');
+          for (const video of videos) {
+            if (video.currentTime > 0) {
+              return Math.floor(video.currentTime);
+            }
+          }
+          return undefined;
+        },
+      });
+
+      if (mainResults[0]?.result !== undefined) {
+        return mainResults[0].result;
+      }
+
+      // Try all frames (for videos in iframes)
+      const allFrameResults = await chrome.scripting.executeScript({
+        target: { tabId, allFrames: true },
+        func: () => {
+          const videos = document.querySelectorAll('video');
+          for (const video of videos) {
+            if (video.currentTime > 0) {
+              return Math.floor(video.currentTime);
+            }
+          }
+          return undefined;
+        },
+      });
+
+      // Find first frame with a valid timestamp
+      for (const result of allFrameResults) {
+        if (result?.result !== undefined) {
+          return result.result;
+        }
+      }
+
+      return undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   // Quick update for matched work
   async function handleQuickUpdate() {
     if (!matchedWork || !currentTab) return;
@@ -264,11 +315,25 @@ export function App() {
     const progress = extractProgress(currentTab.url, currentTab.title, matchedWork.type);
     const isAnime = matchedWork.type === 'anime';
 
+    // Try to get video timestamp for anime
+    let timestamp: number | undefined;
+    if (isAnime) {
+      try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (tab?.id) {
+          timestamp = await extractVideoTimestamp(tab.id);
+        }
+      } catch {
+        // Continue without timestamp
+      }
+    }
+
     await createWaypoint({
       workId: matchedWork.id,
       sourceUrl: currentTab.url,
       chapter: progress.chapter || (isAnime ? undefined : matchedWork.latestWaypoint?.chapter),
       episode: progress.episode || (isAnime ? matchedWork.latestWaypoint?.episode : undefined),
+      timestamp: isAnime ? timestamp : undefined,
     });
     await loadWorks();
     addToast(`Updated "${matchedWork.title}"`);
@@ -279,10 +344,14 @@ export function App() {
     if (!currentTab) return;
 
     let pageContent = '';
+    let timestamp: number | undefined;
+    let tabId: number | undefined;
+
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (tab?.id) {
-        pageContent = await extractPageContent(tab.id);
+      tabId = tab?.id;
+      if (tabId) {
+        pageContent = await extractPageContent(tabId);
       }
     } catch {
       // Continue without page content
@@ -293,12 +362,22 @@ export function App() {
     const progress = extractProgress(currentTab.url, currentTab.title, type);
     const status = type === 'anime' ? 'watching' : 'reading';
 
+    // Try to get video timestamp for anime
+    if (type === 'anime' && tabId) {
+      try {
+        timestamp = await extractVideoTimestamp(tabId);
+      } catch {
+        // Continue without timestamp
+      }
+    }
+
     const work = await createWork({ title, type, status });
     await createWaypoint({
       workId: work.id,
       sourceUrl: currentTab.url,
       chapter: progress.chapter,
       episode: progress.episode,
+      timestamp: type === 'anime' ? timestamp : undefined,
     });
     await loadWorks();
     setView({ type: 'list' });
