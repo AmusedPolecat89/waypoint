@@ -320,42 +320,470 @@ export function App() {
 
   function getDomain(url: string): string {
     try {
-      return new URL(url).hostname;
+      return new URL(url).hostname.replace(/^www\./, '');
     } catch {
       return '';
     }
   }
 
-  // Extract chapter/episode from URL
-  function extractProgressFromUrl(url: string): { chapter?: number; episode?: number } {
-    const patterns = [
-      /chapter[_-]?(\d+)/i,
-      /ch[_-]?(\d+)/i,
-      /episode[_-]?(\d+)/i,
-      /ep[_-]?(\d+)/i,
-      /\/(\d+)\/?$/,
+  /**
+   * Extract text content from the current page for keyword scanning
+   */
+  async function extractPageContent(tabId: number): Promise<string> {
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => {
+          // Get text from key elements that typically contain media type info
+          const selectors = [
+            'h1', 'h2', 'h3',                    // Headings
+            '.genre', '.genres', '[class*="genre"]', // Genre tags
+            '.tag', '.tags', '[class*="tag"]',   // Tags
+            '.type', '[class*="type"]',          // Type labels
+            '.info', '.details', '.meta',        // Info sections
+            '.breadcrumb', '[class*="breadcrumb"]', // Breadcrumbs
+            '.category', '[class*="category"]',  // Category labels
+            'title', 'meta[name="description"]', // Meta info
+          ];
+
+          const textParts: string[] = [];
+
+          // Get meta description
+          const metaDesc = document.querySelector('meta[name="description"]');
+          if (metaDesc) {
+            textParts.push(metaDesc.getAttribute('content') || '');
+          }
+
+          // Get text from selected elements
+          for (const selector of selectors) {
+            const elements = document.querySelectorAll(selector);
+            elements.forEach(el => {
+              const text = el.textContent?.trim();
+              if (text && text.length < 500) { // Avoid huge text blocks
+                textParts.push(text);
+              }
+            });
+          }
+
+          // Also scan the first 5000 chars of body text for keywords
+          const bodyText = document.body?.innerText?.substring(0, 5000) || '';
+          textParts.push(bodyText);
+
+          return textParts.join(' ').toLowerCase();
+        },
+      });
+
+      return results[0]?.result || '';
+    } catch {
+      // Permission denied or other error - return empty string
+      return '';
+    }
+  }
+
+  /**
+   * Detect media type from URL, title, and page content
+   */
+  function detectMediaType(url: string, title: string, pageContent: string = ''): MediaType {
+    const urlLower = url.toLowerCase();
+    const titleLower = title.toLowerCase();
+    const contentLower = pageContent.toLowerCase();
+    const domain = getDomain(url);
+
+    // Combine all text for keyword scanning
+    const allText = `${urlLower} ${titleLower} ${contentLower}`;
+
+    // Keywords for each category (weighted by specificity)
+    const keywordScores: Record<MediaType, number> = {
+      anime: 0,
+      manga: 0,
+      webcomic: 0,
+      novel: 0,
+    };
+
+    // --- ANIME keywords ---
+    const animeKeywords = [
+      // Core terms
+      'anime', 'episode', 'episodes', 'streaming', 'subbed', 'dubbed',
+      'sub', 'dub', 'ova', 'ona', 'simulcast', 'season', 'seasons',
+      // Streaming terms
+      'watch online', 'stream', 'video player', 'autoplay next',
+      // Anime-specific terms
+      'opening', 'ending', 'op', 'ed', 'filler', 'filler list', 'canon',
+      'voice actor', 'seiyuu', 'studio', 'animation studio',
+      // Japanese terms
+      'アニメ', 'エピソード', '話', '期', 'シーズン',
+      // Quality/format terms
+      '1080p', '720p', '480p', 'bluray', 'bd', 'dvd', 'raw',
+      // Site-specific
+      'crunchyroll', 'funimation', 'hidive', 'netflix anime', 'animelab'
     ];
 
+    // --- MANGA keywords (Japanese comics) ---
+    const mangaKeywords = [
+      // Core terms
+      'manga', 'mangaka', 'read manga', 'manga reader', 'manga scan',
+      // Demographics
+      'shonen', 'shounen', 'shojo', 'shoujo', 'seinen', 'josei', 'kodomo',
+      // Formats
+      'oneshot', 'one-shot', 'tankoubon', 'tankobon', 'volume',
+      // Publishers/magazines
+      'jump', 'shonen jump', 'weekly shonen', 'magazine', 'viz',
+      'kodansha', 'shueisha', 'shogakukan', 'square enix',
+      // Origin terms
+      'japanese', 'japan', 'jp',
+      // Japanese terms
+      'マンガ', '漫画', '少年', '少女', '青年', '女性',
+      // Scanlation terms
+      'raw', 'scanlation', 'scanslation', 'fan translation',
+      // Reading direction
+      'right to left', 'rtl'
+    ];
+
+    // --- WEBCOMIC keywords (Korean/Chinese/Western) ---
+    const webcomicKeywords = [
+      // Core terms
+      'manhwa', 'manhua', 'webtoon', 'webcomic', 'web comic', 'webcomics',
+      'webtoons', 'toon', 'comic', 'comics',
+      // Origin terms
+      'korean', 'chinese', 'korea', 'china', 'kr', 'cn',
+      // Platform terms
+      'tapas', 'tappytoon', 'lezhin', 'toomics', 'manta', 'pocket comics',
+      'line webtoon', 'naver', 'kakao', 'daum', 'kuaikan', 'bilibili comics',
+      // Format terms
+      'vertical scroll', 'long strip', 'full color', 'full colour', 'colored',
+      'scroll down', 'infinite scroll',
+      // Korean terms
+      '웹툰', '만화', '네이버', '카카오',
+      // Chinese terms
+      '漫画网', '动漫', '国漫', '漫画屋',
+      // Genre terms common in manhwa/manhua
+      'cultivation', 'regression', 'reincarnation', 'system', 'hunter',
+      'tower', 'dungeon', 'awakening', 'martial arts', 'murim'
+    ];
+
+    // --- NOVEL keywords ---
+    const novelKeywords = [
+      // Core terms
+      'novel', 'light novel', 'lightnovel', 'web novel', 'webnovel',
+      'ln', 'wn', 'fiction', 'story', 'stories', 'chapter', 'chapters',
+      // Fan fiction
+      'fanfiction', 'fanfic', 'fan fiction', 'fan fic', 'fic',
+      // Genre terms
+      'wuxia', 'xianxia', 'xuanhuan', 'cultivation', 'isekai', 'litrpg',
+      'lit rpg', 'progression', 'progression fantasy', 'gamelit',
+      'harem', 'romance', 'fantasy', 'sci-fi', 'slice of life',
+      // Platform terms
+      'royalroad', 'scribblehub', 'wattpad', 'ao3', 'archiveofourown',
+      'webnovel', 'qidian', '起点',
+      // Format terms
+      'word count', 'pages', 'reading time', 'author note',
+      // Japanese terms
+      'ライトノベル', '小説', 'なろう', 'syosetu',
+      // Chinese terms
+      '小说', '轻小说', '网文',
+      // Book terms
+      'volume', 'vol', 'book', 'arc', 'part', 'prologue', 'epilogue',
+      // Original fiction indicators
+      'original', 'original fiction', 'oc', 'original character'
+    ];
+
+    // Count keyword occurrences
+    for (const kw of animeKeywords) {
+      if (allText.includes(kw)) keywordScores.anime += (kw.length > 4 ? 2 : 1);
+    }
+    for (const kw of mangaKeywords) {
+      if (allText.includes(kw)) keywordScores.manga += (kw.length > 4 ? 2 : 1);
+    }
+    for (const kw of webcomicKeywords) {
+      if (allText.includes(kw)) keywordScores.webcomic += (kw.length > 4 ? 2 : 1);
+    }
+    for (const kw of novelKeywords) {
+      if (allText.includes(kw)) keywordScores.novel += (kw.length > 4 ? 2 : 1);
+    }
+
+    // Known site domains (highest priority overrides)
+    const animeSites = [
+      // Major legal streaming
+      'crunchyroll.com', 'funimation.com', 'hidive.com', 'vrv.co',
+      'wakanim.tv', 'animelab.com', 'animax.com',
+      // Netflix/Prime anime sections
+      'netflix.com/browse/genre/7424', 'amazon.com/anime',
+      // Anime tracking/database
+      'myanimelist.net', 'anilist.co', 'kitsu.io', 'anime-planet.com',
+      'anidb.net', 'annict.com', 'annict.jp', 'livechart.me',
+      // Fan/unofficial streaming
+      '9anime', 'gogoanime', 'animixplay', 'zoro.to', 'aniwatch',
+      'animesuge', 'animepahe', 'twist.moe', 'animekisa', 'animedao',
+      'animefrenzy', 'animeowl', 'animesaturn', 'animeflv',
+      'jkanime', 'monoschinos', 'tioanime', 'animeyt',
+      'kayoanime', 'animension', 'animebee', 'gogoanimes',
+      'animeonsen', '4anime', 'animekayo', 'animeheaven',
+      'aniwatcher', 'animevibe', 'ryuanime', 'dubbedanime',
+      'watchcartoononline', 'kimcartoon'
+    ];
+
+    const mangaSites = [
+      // Official/legal
+      'mangadex.org', 'mangaplus.shueisha.co.jp', 'viz.com',
+      'kodansha.us', 'manga.club', 'comikey.com', 'azuki.co',
+      'inkr.com', 'coolmic.me', 'mangamo.com', 'shonenjump.com',
+      // Aggregators (primarily Japanese manga)
+      'mangasee123.com', 'manga4life.com', 'mangareader.to', 'mangakakalot.com',
+      'mangakatana.com', 'mangapill.com', 'mangahub.io', 'mangapark.to',
+      'mangafox.me', 'mangahere.cc', 'mangaeden.com', 'mangafreak.me',
+      'mangaowl.net', 'mangairo.com', 'mangabat.com', 'manganelo.com',
+      'mangaclash.com', 'mangajar.com', 'readmng.com', 'mangadoom.co',
+      'mangahasu.se', 'rawdevart.com', 'mangaraw.org', 'mangarawjp.com',
+      // Japanese raw sites
+      'rawkuma.com', 'klmanga.com', 'manga1000.com', 'manga1001.com'
+    ];
+
+    const webcomicSites = [
+      // Official platforms - Korean
+      'webtoons.com', 'webtoon.xyz', 'tapas.io', 'tappytoon.com',
+      'lezhin.com', 'lezhincomics.com', 'toomics.com', 'manta.net',
+      'netcomics.com', 'pocketcomics.com', 'lehzin.com', 'bomtoon.com',
+      'mrblue.com', 'kakaopage.com', 'naver.com/webtoon',
+      // Official platforms - Chinese
+      'kuaikanmanhua.com', 'bilibili.com/manga', 'dmzj.com', 'manhuagui.com',
+      'ac.qq.com', 'u17.com', 'dongmanmanhua.cn', 'webcomicsapp.com',
+      // Scanlation sites (primarily manhwa/manhua)
+      'asurascans.com', 'asuracomic.net', 'asuratoon.com',
+      'reaperscans.com', 'reapersans.com',
+      'flamecomics.com', 'flamescans.org',
+      'luminousscans.com', 'luminousscans.net',
+      'manhuascan.io', 'manhuaus.com', 'manhuaplus.com',
+      'manhwatop.com', 'manhwa18.com', 'manhwaclan.com',
+      'zinmanga.com', 'mangatx.com', 'manhwabuddy.com',
+      'resetscans.com', 'hivetoon.com', 'infernalvoidscans.com',
+      'nitroscans.com', 'nightscans.net', 'harmonyscan.com',
+      'immortalupdates.com', 'cosmic-scans.com', 'astrascans.com',
+      'rizzfables.com', 'arvenscans.com', 'skscans.com',
+      // Aggregators
+      'bato.to', 'batotoo.com', 'comick.io', 'comick.fun',
+      'mangagg.com', 'toonily.com', 'manhwax.com', 'manhuafast.com',
+      '1stkissmanga.io', '1stkissmanga.me', 'manhwa-freak.com'
+    ];
+
+    const novelSites = [
+      // English original fiction
+      'royalroad.com', 'scribblehub.com', 'wattpad.com',
+      'fictionpress.com', 'penana.com', 'inkitt.com', 'tapas.io/novels',
+      'honeyfeed.fm', 'webnovel.com', 'neovel.io', 'moonquill.com',
+      // Fan fiction
+      'archiveofourown.org', 'fanfiction.net', 'quotev.com',
+      'asianfanfics.com', 'spiritfanfiction.com',
+      // Chinese novel sites
+      'wuxiaworld.com', 'novelfull.com', 'lightnovelpub.com',
+      'novelupdates.com', 'novelbin.com', 'novelhall.com',
+      'readlightnovel.org', 'boxnovel.com', 'noveltop.com',
+      'wnmtl.org', 'wuxiaworld.site', 'novelsemperor.com',
+      'wuxiap.com', 'ranobes.net', 'freewebnovel.com',
+      'lightnovelreader.org', 'lightnovelsonl.com', 'pandanovel.com',
+      '69shu.com', 'shu69.com', 'qidian.com', 'jjwxc.net',
+      // Japanese novel sites
+      'syosetu.com', 'kakuyomu.jp', 'j-novel.club', 'yenpress.com',
+      // Novel tracking
+      'novelupdates.com', 'lndb.info'
+    ];
+
+    // Check domain for definitive matches
+    for (const site of animeSites) {
+      if (domain.includes(site) || urlLower.includes(site)) {
+        keywordScores.anime += 50; // Strong boost
+      }
+    }
+    for (const site of mangaSites) {
+      if (domain.includes(site) || urlLower.includes(site)) {
+        keywordScores.manga += 50;
+      }
+    }
+    for (const site of webcomicSites) {
+      if (domain.includes(site) || urlLower.includes(site)) {
+        keywordScores.webcomic += 50;
+      }
+    }
+    for (const site of novelSites) {
+      if (domain.includes(site) || urlLower.includes(site)) {
+        keywordScores.novel += 50;
+      }
+    }
+
+    // Find the category with highest score
+    let maxScore = 0;
+    let detected: MediaType = 'manga'; // default fallback
+
+    for (const [type, score] of Object.entries(keywordScores) as [MediaType, number][]) {
+      if (score > maxScore) {
+        maxScore = score;
+        detected = type;
+      }
+    }
+
+    return detected;
+  }
+
+  /**
+   * Extract chapter/episode number from URL and title
+   */
+  function extractProgress(url: string, title: string, mediaType: MediaType): { chapter?: number; episode?: number } {
+    const urlLower = url.toLowerCase();
+    const titleLower = title.toLowerCase();
+
+    // Episode patterns for anime
+    const episodePatterns = [
+      /episode[_\-\s]*(\d+)/i,
+      /ep[_\-\s]*(\d+)/i,
+      /e(\d+)(?!\d)/i,
+      /\bs(\d+)e(\d+)/i,  // S01E05 format - captures episode
+      /\bepisode\s*(\d+)/i,
+      /【(\d+)】/,  // Japanese episode markers
+      /第(\d+)話/,  // Japanese episode
+      /episode[^\d]*(\d+)/i,
+    ];
+
+    // Chapter patterns for manga/comics/novels
+    const chapterPatterns = [
+      /chapter[_\-\s]*(\d+(?:\.\d+)?)/i,
+      /ch[_\-\.\s]*(\d+(?:\.\d+)?)/i,
+      /chap[_\-\.\s]*(\d+(?:\.\d+)?)/i,
+      /c(\d+)(?!\d)/i,
+      /(?:^|\/|-)(\d+(?:\.\d+)?)(?:\/|$|-|\.html)/,  // URL number patterns
+      /第(\d+)章/,  // Japanese chapter
+      /第(\d+)话/,  // Chinese chapter
+      /[\[\(](\d+)[\]\)]/,  // [123] or (123)
+      /\s(\d+)(?:\s|$)/,  // Loose number at end
+    ];
+
+    const isAnime = mediaType === 'anime';
+    const patterns = isAnime ? episodePatterns : chapterPatterns;
+
+    // Try URL first (more reliable)
     for (const pattern of patterns) {
-      const match = url.match(pattern);
+      const match = urlLower.match(pattern);
       if (match) {
-        const num = parseInt(match[1], 10);
+        // Handle S01E05 format specially
+        const numStr = match[2] || match[1];
+        const num = parseFloat(numStr);
         if (!isNaN(num) && num > 0 && num < 10000) {
-          if (pattern.source.toLowerCase().includes('ep')) {
-            return { episode: num };
-          }
-          return { chapter: num };
+          return isAnime ? { episode: Math.floor(num) } : { chapter: num };
         }
       }
     }
+
+    // Try title
+    for (const pattern of patterns) {
+      const match = titleLower.match(pattern);
+      if (match) {
+        const numStr = match[2] || match[1];
+        const num = parseFloat(numStr);
+        if (!isNaN(num) && num > 0 && num < 10000) {
+          return isAnime ? { episode: Math.floor(num) } : { chapter: num };
+        }
+      }
+    }
+
+    // Last resort: find any number in URL path that looks like a chapter
+    const pathMatch = url.match(/\/(\d+)(?:\/|$|\?)/);
+    if (pathMatch) {
+      const num = parseInt(pathMatch[1], 10);
+      if (num > 0 && num < 5000) {
+        return isAnime ? { episode: num } : { chapter: num };
+      }
+    }
+
     return {};
+  }
+
+  /**
+   * Clean up and extract the work title from page title
+   */
+  function extractTitle(pageTitle: string, url: string): string {
+    let title = pageTitle;
+
+    // Remove common site suffixes
+    const suffixPatterns = [
+      / [-–—|:] .{0,30}$/,  // "Title - Site Name" (short suffixes only)
+      / :: .+$/,
+      /\s*\([^)]{0,20}\)$/,  // (Site Name) at end
+      /\s*【[^】]+】$/,  // Japanese brackets at end
+      / - Read .+$/i,
+      / Chapter \d+.*$/i,
+      / Episode \d+.*$/i,
+      / Ch\.\s*\d+.*$/i,
+      / Ep\.\s*\d+.*$/i,
+      / #\d+.*$/,
+      /\s*-\s*Chapter\s*\d+/i,
+      /\s*-\s*Episode\s*\d+/i,
+    ];
+
+    for (const pattern of suffixPatterns) {
+      title = title.replace(pattern, '');
+    }
+
+    // Remove prefix patterns
+    const prefixPatterns = [
+      /^Read\s+/i,
+      /^Watch\s+/i,
+      /^Stream\s+/i,
+      /^Chapter\s*\d+\s*[-–:]\s*/i,
+      /^Episode\s*\d+\s*[-–:]\s*/i,
+    ];
+
+    for (const pattern of prefixPatterns) {
+      title = title.replace(pattern, '');
+    }
+
+    // Clean up extra whitespace
+    title = title.replace(/\s+/g, ' ').trim();
+
+    // If title is too short or generic, try to extract from URL
+    if (title.length < 3 || /^(home|index|page|read|watch|chapter|episode)$/i.test(title)) {
+      const urlTitle = extractTitleFromUrl(url);
+      if (urlTitle && urlTitle.length > title.length) {
+        title = urlTitle;
+      }
+    }
+
+    return title || 'Untitled';
+  }
+
+  /**
+   * Try to extract a readable title from URL path
+   */
+  function extractTitleFromUrl(url: string): string {
+    try {
+      const pathname = new URL(url).pathname;
+      const parts = pathname.split('/').filter(Boolean);
+
+      // Skip common non-title segments
+      const skipSegments = ['manga', 'comic', 'anime', 'novel', 'read', 'watch', 'chapter', 'episode', 'series', 'title'];
+
+      for (const part of parts) {
+        // Skip if it's a number or common segment
+        if (/^\d+$/.test(part) || skipSegments.includes(part.toLowerCase())) continue;
+
+        // Convert URL slug to readable title
+        const cleaned = part
+          .replace(/[-_]/g, ' ')
+          .replace(/\.(html?|php|aspx?)$/i, '')
+          .replace(/\b\w/g, c => c.toUpperCase());
+
+        if (cleaned.length >= 3) {
+          return cleaned;
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return '';
   }
 
   // Quick update for matched work
   async function handleQuickUpdate() {
     if (!matchedWork || !currentTab) return;
 
-    const progress = extractProgressFromUrl(currentTab.url);
+    const progress = extractProgress(currentTab.url, currentTab.title, matchedWork.type);
     const isAnime = matchedWork.type === 'anime';
 
     await createWaypoint({
@@ -369,22 +797,29 @@ export function App() {
   }
 
   // Quick add from current tab
-  async function handleQuickAdd(type: MediaType) {
+  async function handleQuickAdd() {
     if (!currentTab) return;
 
-    // Clean up title
-    let title = currentTab.title;
-    const suffixPatterns = [
-      / [-–—|] .+$/,
-      / :: .+$/,
-      /\s*\(.+\)$/,
-    ];
-    for (const pattern of suffixPatterns) {
-      title = title.replace(pattern, '');
+    // Get the tab ID for content extraction
+    let pageContent = '';
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab?.id) {
+        pageContent = await extractPageContent(tab.id);
+      }
+    } catch {
+      // Continue without page content if extraction fails
     }
-    title = title.trim();
 
-    const progress = extractProgressFromUrl(currentTab.url);
+    // Auto-detect media type from URL, title, and page content
+    const type = detectMediaType(currentTab.url, currentTab.title, pageContent);
+
+    // Extract clean title
+    const title = extractTitle(currentTab.title, currentTab.url);
+
+    // Extract progress (chapter/episode)
+    const progress = extractProgress(currentTab.url, currentTab.title, type);
+
     const status = type === 'anime' ? 'watching' : 'reading';
 
     const work = await createWork({ title, type, status });
@@ -396,7 +831,7 @@ export function App() {
     });
     await loadWorks();
     setView({ type: 'list' });
-    addToast(`Added "${title}"`);
+    addToast(`Added "${title}" as ${type}`);
   }
 
   async function handleAddWork(data: { title: string; type: MediaType }) {
@@ -698,7 +1133,7 @@ function QuickActionBar({
   currentTab: { url: string; title: string };
   matchedWork: WorkWithProgress | null;
   onQuickUpdate: () => void;
-  onQuickAdd: (type: MediaType) => void;
+  onQuickAdd: () => void;
 }) {
   // Clean up title for display
   let cleanTitle = currentTab.title;
@@ -743,7 +1178,7 @@ function QuickActionBar({
           <p class="text-xs text-text-secondary truncate">{cleanTitle}</p>
         </div>
         <button
-          onClick={() => onQuickAdd('manga')}
+          onClick={onQuickAdd}
           class="shrink-0 px-3 py-1.5 bg-accent text-white text-xs font-medium rounded-md hover:bg-accent-hover transition-colors"
         >
           Quick Add
