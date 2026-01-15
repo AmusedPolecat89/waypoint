@@ -33,7 +33,11 @@ import {
   SkeletonLoader,
 } from './components';
 
-export function App() {
+interface AppProps {
+  isSidePanel?: boolean;
+}
+
+export function App({ isSidePanel = false }: AppProps) {
   const [works, setWorks] = useState<WorkWithProgress[]>([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<View>({ type: 'list' });
@@ -502,9 +506,14 @@ export function App() {
 
   const hasFilters = search || statusFilter !== 'all' || typeFilter !== 'all';
 
+  // Container classes based on mode
+  const containerClass = isSidePanel
+    ? 'w-full h-screen flex flex-col bg-surface text-text relative'
+    : 'w-[400px] min-h-[200px] max-h-[600px] flex flex-col bg-surface text-text relative';
+
   return (
     <div
-      class="w-[400px] min-h-[200px] max-h-[600px] flex flex-col bg-surface text-text relative"
+      class={containerClass}
       role="application"
       aria-label="Waypoint - Media Progress Tracker"
     >
@@ -529,6 +538,7 @@ export function App() {
           <Header
             onAdd={() => setView({ type: 'add' })}
             onSettings={openOptions}
+            isSidePanel={isSidePanel}
           />
 
           {currentTab && (

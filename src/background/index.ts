@@ -262,4 +262,29 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     });
     return true; // Keep channel open for async response
   }
+
+  if (message.type === 'open-side-panel') {
+    // Open the side panel for the current window
+    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+      if (tabs[0]?.windowId) {
+        try {
+          await chrome.sidePanel.open({ windowId: tabs[0].windowId });
+          sendResponse({ success: true });
+        } catch (error) {
+          console.error('Failed to open side panel:', error);
+          sendResponse({ success: false, error: String(error) });
+        }
+      } else {
+        sendResponse({ success: false, error: 'No active window' });
+      }
+    });
+    return true; // Keep channel open for async response
+  }
+
+  if (message.type === 'get-side-panel-mode') {
+    // Return whether we're in side panel mode based on sender
+    // The popup and sidepanel have different URLs
+    sendResponse({ isSidePanel: _sender.url?.includes('sidepanel') ?? false });
+    return false;
+  }
 });

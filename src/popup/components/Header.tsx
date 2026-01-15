@@ -1,9 +1,26 @@
 interface HeaderProps {
   onAdd: () => void;
   onSettings: () => void;
+  isSidePanel?: boolean;
 }
 
-export function Header({ onAdd, onSettings }: HeaderProps) {
+export function Header({ onAdd, onSettings, isSidePanel = false }: HeaderProps) {
+  async function handleToggleSidePanel() {
+    if (isSidePanel) {
+      // Already in side panel - close the window/panel
+      window.close();
+    } else {
+      // In popup - open side panel
+      try {
+        await chrome.runtime.sendMessage({ type: 'open-side-panel' });
+        // Close the popup after opening side panel
+        window.close();
+      } catch (error) {
+        console.error('Failed to open side panel:', error);
+      }
+    }
+  }
+
   return (
     <header
       class="flex items-center justify-between px-4 py-3 border-b border-border shrink-0"
@@ -26,6 +43,25 @@ export function Header({ onAdd, onSettings }: HeaderProps) {
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
           </svg>
           Add
+        </button>
+        <button
+          onClick={handleToggleSidePanel}
+          class="p-1.5 text-text-secondary hover:text-text hover:bg-surface-secondary rounded-md active:scale-95 transition-all"
+          aria-label={isSidePanel ? 'Close side panel' : 'Open in side panel'}
+          title={isSidePanel ? 'Close side panel' : 'Open in side panel'}
+        >
+          {isSidePanel ? (
+            // Icon for closing/collapsing (panel with arrow pointing right)
+            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+            </svg>
+          ) : (
+            // Icon for side panel (panel layout)
+            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5h16a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V6a1 1 0 011-1z" />
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 5v14" />
+            </svg>
+          )}
         </button>
         <button
           onClick={onSettings}
