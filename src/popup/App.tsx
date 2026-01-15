@@ -148,8 +148,13 @@ export function App() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const { toasts, addToast, removeToast } = useToasts();
 
+  // Current tab info for quick add/update
+  const [currentTab, setCurrentTab] = useState<{ url: string; title: string } | null>(null);
+  const [matchedWork, setMatchedWork] = useState<WorkWithProgress | null>(null);
+
   useEffect(() => {
     loadWorks();
+    loadCurrentTab();
   }, []);
 
   // Reset selection when filters change
@@ -267,6 +272,133 @@ export function App() {
     setLoading(false);
   }
 
+  async function loadCurrentTab() {
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab?.url && tab?.title) {
+        setCurrentTab({ url: tab.url, title: tab.title });
+      }
+    } catch {
+      // Ignore errors (e.g., on chrome:// pages)
+    }
+  }
+
+  // Detect if current tab matches any existing work
+  useEffect(() => {
+    if (!currentTab?.url || works.length === 0) {
+      setMatchedWork(null);
+      return;
+    }
+
+    // Try to match by source URL domain or exact URL
+    const currentDomain = getDomain(currentTab.url);
+
+    // Find work with matching source URL
+    const matched = works.find((work) => {
+      if (!work.latestWaypoint?.sourceUrl) return false;
+      const workDomain = getDomain(work.latestWaypoint.sourceUrl);
+
+      // Match if same domain and URL contains work title (loose match)
+      // Or if exact URL match
+      if (work.latestWaypoint.sourceUrl === currentTab.url) return true;
+      if (currentDomain === workDomain) {
+        // Check if URL path has similar structure (same manga/anime)
+        const currentPath = new URL(currentTab.url).pathname.toLowerCase();
+        const workPath = new URL(work.latestWaypoint.sourceUrl).pathname.toLowerCase();
+        // Match if first part of path is the same (e.g., /manga/one-piece/123 matches /manga/one-piece/124)
+        const currentParts = currentPath.split('/').filter(Boolean);
+        const workParts = workPath.split('/').filter(Boolean);
+        if (currentParts.length >= 2 && workParts.length >= 2) {
+          return currentParts[0] === workParts[0] && currentParts[1] === workParts[1];
+        }
+      }
+      return false;
+    });
+
+    setMatchedWork(matched ?? null);
+  }, [currentTab, works]);
+
+  function getDomain(url: string): string {
+    try {
+      return new URL(url).hostname;
+    } catch {
+      return '';
+    }
+  }
+
+  // Extract chapter/episode from URL
+  function extractProgressFromUrl(url: string): { chapter?: number; episode?: number } {
+    const patterns = [
+      /chapter[_-]?(\d+)/i,
+      /ch[_-]?(\d+)/i,
+      /episode[_-]?(\d+)/i,
+      /ep[_-]?(\d+)/i,
+      /\/(\d+)\/?$/,
+    ];
+
+    for (const pattern of patterns) {
+      const match = url.match(pattern);
+      if (match) {
+        const num = parseInt(match[1], 10);
+        if (!isNaN(num) && num > 0 && num < 10000) {
+          if (pattern.source.toLowerCase().includes('ep')) {
+            return { episode: num };
+          }
+          return { chapter: num };
+        }
+      }
+    }
+    return {};
+  }
+
+  // Quick update for matched work
+  async function handleQuickUpdate() {
+    if (!matchedWork || !currentTab) return;
+
+    const progress = extractProgressFromUrl(currentTab.url);
+    const isAnime = matchedWork.type === 'anime';
+
+    await createWaypoint({
+      workId: matchedWork.id,
+      sourceUrl: currentTab.url,
+      chapter: progress.chapter || (isAnime ? undefined : matchedWork.latestWaypoint?.chapter),
+      episode: progress.episode || (isAnime ? matchedWork.latestWaypoint?.episode : undefined),
+    });
+    await loadWorks();
+    addToast(`Updated "${matchedWork.title}"`);
+  }
+
+  // Quick add from current tab
+  async function handleQuickAdd(type: MediaType) {
+    if (!currentTab) return;
+
+    // Clean up title
+    let title = currentTab.title;
+    const suffixPatterns = [
+      / [-–—|] .+$/,
+      / :: .+$/,
+      /\s*\(.+\)$/,
+    ];
+    for (const pattern of suffixPatterns) {
+      title = title.replace(pattern, '');
+    }
+    title = title.trim();
+
+    const progress = extractProgressFromUrl(currentTab.url);
+    const status = type === 'anime' ? 'watching' : 'reading';
+
+    const work = await createWork({ title, type, status });
+    await createWaypoint({
+      workId: work.id,
+      sourceUrl: currentTab.url,
+      chapter: progress.chapter,
+      episode: progress.episode,
+    });
+    await loadWorks();
+    setView({ type: 'list' });
+    addToast(`Added "${title}"`);
+  }
+
   async function handleAddWork(data: { title: string; type: MediaType }) {
     await createWork({
       title: data.title,
@@ -382,6 +514,15 @@ export function App() {
             onAdd={() => setView({ type: 'add' })}
             onSettings={openOptions}
           />
+          {/* Quick Action Bar - shows when on a trackable page */}
+          {currentTab && (
+            <QuickActionBar
+              currentTab={currentTab}
+              matchedWork={matchedWork}
+              onQuickUpdate={handleQuickUpdate}
+              onQuickAdd={handleQuickAdd}
+            />
+          )}
           {/* Search and Filters - only show when there are works */}
           {!loading && works.length > 0 && (
             <div class="px-4 pt-3 pb-2 border-b border-border space-y-2">
@@ -542,6 +683,73 @@ function Header({
         </button>
       </div>
     </header>
+  );
+}
+
+/**
+ * Quick action bar for adding or updating the current page
+ */
+function QuickActionBar({
+  currentTab,
+  matchedWork,
+  onQuickUpdate,
+  onQuickAdd,
+}: {
+  currentTab: { url: string; title: string };
+  matchedWork: WorkWithProgress | null;
+  onQuickUpdate: () => void;
+  onQuickAdd: (type: MediaType) => void;
+}) {
+  // Clean up title for display
+  let cleanTitle = currentTab.title;
+  const suffixPatterns = [/ [-–—|] .+$/, / :: .+$/, /\s*\(.+\)$/];
+  for (const pattern of suffixPatterns) {
+    cleanTitle = cleanTitle.replace(pattern, '');
+  }
+  cleanTitle = cleanTitle.trim();
+  if (cleanTitle.length > 40) {
+    cleanTitle = cleanTitle.substring(0, 40) + '...';
+  }
+
+  // If we have a matched work, show update UI
+  if (matchedWork) {
+    return (
+      <div class="px-4 py-2 bg-accent-subtle border-b border-accent/20">
+        <div class="flex items-center justify-between gap-2">
+          <div class="min-w-0 flex-1">
+            <p class="text-xs text-accent font-medium truncate">
+              {matchedWork.title}
+            </p>
+            <p class="text-xs text-text-secondary">
+              {matchedWork.progress ?? 'No progress yet'}
+            </p>
+          </div>
+          <button
+            onClick={onQuickUpdate}
+            class="shrink-0 px-3 py-1.5 bg-accent text-white text-xs font-medium rounded-md hover:bg-accent-hover transition-colors"
+          >
+            Update
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Otherwise show add UI
+  return (
+    <div class="px-4 py-2 bg-surface-secondary border-b border-border">
+      <div class="flex items-center justify-between gap-2">
+        <div class="min-w-0 flex-1">
+          <p class="text-xs text-text-secondary truncate">{cleanTitle}</p>
+        </div>
+        <button
+          onClick={() => onQuickAdd('manga')}
+          class="shrink-0 px-3 py-1.5 bg-accent text-white text-xs font-medium rounded-md hover:bg-accent-hover transition-colors"
+        >
+          Quick Add
+        </button>
+      </div>
+    </div>
   );
 }
 
